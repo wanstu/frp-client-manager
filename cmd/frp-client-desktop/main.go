@@ -43,7 +43,7 @@ func runDesktop(app *App, launch desktopkit.LaunchOptions) error {
 	window.Height = 720
 	window.MinWidth = 860
 	window.MinHeight = 600
-	window.HidePolicy = desktopkit.HideAlways
+	window.HidePolicy = desktopkit.HideSafe
 	window.StartHiddenOnAutoStart = true
 	window.Background = desktopkit.Color{R: 245, G: 247, B: 250, A: 1}
 

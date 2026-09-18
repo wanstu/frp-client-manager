@@ -6,9 +6,9 @@
 
 - Wails 2 + Go 桌面应用
 - Windows / Linux / macOS 系统托盘
-- 关闭主窗口后隐藏到托盘
+- Windows/macOS 在托盘就绪后关闭到托盘；Linux 默认保持可见
 - 跨平台登录自启：Windows HKCU Run、Linux XDG Autostart、macOS LaunchAgent
-- `--autostart` 隐藏启动
+- `--autostart` 在 Windows/macOS 托盘就绪后隐藏；Linux 自启动保持可见
 - 单实例运行，重复启动时唤醒主窗口
 - 配置 frpc 可执行文件并管理多个独立配置 Profile
 - 每个 Profile 可绑定不同 frpc 配置文件、独立启停/重启、独立 PID 与日志
@@ -79,7 +79,8 @@ macOS:   cmd/frp-client-desktop/build/bin/frp-client-manager.app
 
 ## 运行规则
 
-- 点击窗口关闭按钮：仅隐藏到托盘。
+- 点击窗口关闭按钮：Windows/macOS 托盘可用时隐藏到托盘；Linux 或托盘失败时退出管理器并保留 frpc。
+- 托盘初始化或运行失败会恢复主窗口，避免应用隐藏后无法找回。
 - 托盘“退出（保留 frpc）”：管理器退出，当前所有 frpc 继续运行。
 - 托盘“退出并停止 frpc”：先停止全部受管理的 frpc，再退出管理器。
 - 下次启动管理器时，如果此前保留的 frpc 仍存在，会通过各 Profile 的 PID 文件恢复管理状态。

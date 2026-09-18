@@ -26,6 +26,7 @@ try {
     Push-Location $Desktop
     try {
         wails build -clean
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     finally {
         Pop-Location
