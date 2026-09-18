@@ -15,7 +15,14 @@ if (Test-Path $WindowsIcon) {
 
 Push-Location $Root
 try {
+    node --check cmd/frp-client-desktop/frontend/app.js
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node scripts/check-frontend.mjs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     go test ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    go vet ./...
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Push-Location $Desktop
     try {
         wails build -clean

@@ -12,10 +12,24 @@ permissions:
   contents: read
 
 jobs:
-  windows:
-    name: Windows build
-    runs-on: windows-latest
-    timeout-minutes: 20
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows amd64
+            os: windows-latest
+            artifact: frp-client-manager-windows-amd64
+          - name: Linux amd64
+            os: ubuntu-24.04
+            artifact: frp-client-manager-linux-amd64
+          - name: macOS universal
+            os: macos-latest
+            artifact: frp-client-manager-macos-universal
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -32,40 +46,63 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install Linux Wails dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
       - name: Install Wails CLI
-        shell: pwsh
+        shell: bash
+        if: runner.os != 'Windows'
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
-      - name: Check frontend
+      - name: Install Wails CLI
         shell: pwsh
-        run: |
-          node --check cmd/frp-client-desktop/frontend/app.js
-          node scripts/check-frontend.mjs
+        if: runner.os == 'Windows'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
-      - name: Test
-        shell: pwsh
-        run: go test ./...
-
-      - name: Vet
-        shell: pwsh
-        run: go vet ./...
-
-      - name: Build production EXE
+      - name: Build and verify
+        if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/build.ps1
 
-      - name: Stage artifact
+      - name: Build and verify
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash ./scripts/build.sh
+
+      - name: Stage Windows artifact
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item cmd/frp-client-desktop/build/bin/frp-client-manager.exe dist/frp-client-manager-windows-amd64.exe
           (Get-FileHash dist/frp-client-manager-windows-amd64.exe -Algorithm SHA256).Hash.ToLower() + "  frp-client-manager-windows-amd64.exe" | Set-Content -NoNewline dist/frp-client-manager-windows-amd64.exe.sha256
 
+      - name: Stage Linux artifact
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp cmd/frp-client-desktop/build/bin/frp-client-manager dist/frp-client-manager-linux-amd64
+          chmod +x dist/frp-client-manager-linux-amd64
+          (cd dist && sha256sum frp-client-manager-linux-amd64 > frp-client-manager-linux-amd64.sha256)
+
+      - name: Stage macOS artifact
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            cmd/frp-client-desktop/build/bin/frp-client-manager.app \
+            dist/frp-client-manager-macos-universal.app.zip
+          (cd dist && shasum -a 256 frp-client-manager-macos-universal.app.zip > frp-client-manager-macos-universal.app.zip.sha256)
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: frp-client-manager-windows-amd64
-          path: |
-            dist/frp-client-manager-windows-amd64.exe
-            dist/frp-client-manager-windows-amd64.exe.sha256
+          name: ${{ matrix.artifact }}
+          path: dist/*
           if-no-files-found: error

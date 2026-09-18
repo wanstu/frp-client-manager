@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -46,5 +45,3 @@ func processAlive(pid int, expectedExecutable string) bool {
 	actual, _ = filepath.Abs(actual)
 	return strings.EqualFold(filepath.Clean(actual), filepath.Clean(expected))
 }
-
-var _ = unsafe.Pointer(nil)

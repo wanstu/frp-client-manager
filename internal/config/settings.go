@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -135,11 +136,15 @@ func (s *Store) NewProfileID() string {
 }
 
 func (s *Store) defaults() Settings {
-	frpcPath := "frpc.exe"
+	frpcBinary := "frpc"
+	if runtime.GOOS == "windows" {
+		frpcBinary = "frpc.exe"
+	}
+	frpcPath := frpcBinary
 	configPath := filepath.Join(s.dir, "frpc.toml")
 	if executable, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(executable)
-		candidateFRPC := filepath.Join(exeDir, "frpc.exe")
+		candidateFRPC := filepath.Join(exeDir, frpcBinary)
 		if _, err := os.Stat(candidateFRPC); err == nil {
 			frpcPath = candidateFRPC
 		}

@@ -1,21 +1,9 @@
-//go:build !windows
+//go:build !windows && !linux && !darwin
 
 package frpc
 
-import (
-	"os"
-	"os/exec"
-)
+import "os/exec"
 
 func prepareCommand(*exec.Cmd) {}
 
-func processAlive(pid int, _ string) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return process.Signal(os.Signal(nil)) == nil
-}
+func processAlive(int, string) bool { return false }

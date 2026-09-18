@@ -38,7 +38,7 @@ func main() {
 
 func launchOptions(args []string) (bool, error) {
 	flags := flag.NewFlagSet("frp-client", flag.ContinueOnError)
-	autostart := flags.Bool("autostart", false, "start hidden after Windows login")
+	autostart := flags.Bool("autostart", false, "start hidden after desktop login")
 	if err := flags.Parse(args); err != nil {
 		return false, err
 	}
