@@ -12,6 +12,7 @@ import (
 
 	"frp-client-manager/internal/config"
 	"frp-client-manager/internal/frpc"
+	"frp-client-manager/internal/frpcdownload"
 	"frp-client-manager/internal/frpconfig"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -30,6 +31,9 @@ type UIState struct {
 	RunningCount           int             `json:"running_count"`
 	LaunchAtLoginSupported bool            `json:"launch_at_login_supported"`
 	LaunchAtLogin          bool            `json:"launch_at_login"`
+	FRPCReady              bool            `json:"frpc_ready"`
+	FRPCDownloadSupported  bool            `json:"frpc_download_supported"`
+	FRPCPlatform           string          `json:"frpc_platform"`
 	DataDir                string          `json:"data_dir"`
 	StartupError           string          `json:"startup_error"`
 }
@@ -47,10 +51,11 @@ type App struct {
 	store         *config.Store
 	launchAtLogin *kitautostart.Manager
 
-	mu           sync.RWMutex
-	ctx          context.Context
-	startupError string
-	managers     map[string]*frpc.Manager
+	mu             sync.RWMutex
+	frpcDownloadMu sync.Mutex
+	ctx            context.Context
+	startupError   string
+	managers       map[string]*frpc.Manager
 }
 
 func NewApp() (*App, error) {
@@ -138,6 +143,9 @@ func (a *App) GetState() (UIState, error) {
 		RunningCount:           runningCount,
 		LaunchAtLoginSupported: a.launchAtLogin.Supported(),
 		LaunchAtLogin:          launchEnabled,
+		FRPCReady:              frpcPathReady(settings.FRPCPath),
+		FRPCDownloadSupported:  frpcdownload.Supported(),
+		FRPCPlatform:           frpcdownload.Platform(),
 		DataDir:                a.store.Dir(),
 		StartupError:           startupError,
 	}, nil

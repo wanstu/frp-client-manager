@@ -15,6 +15,7 @@ let visualConfig = null;
 let visualCatalog = null;
 let selectedProxyIndex = -1;
 let selectedVisitorIndex = -1;
+let frpcDownloadBusy = false;
 
 function backend() {
   const api = window.go?.main?.App;
@@ -345,6 +346,16 @@ function render(state) {
   if (document.activeElement?.id !== 'frpcPath') {
     $('frpcPath').value = state.settings?.frpc_path || '';
   }
+
+  const frpcReady = Boolean(state.frpc_ready);
+  const frpcDownloadSupported = Boolean(state.frpc_download_supported);
+  $('frpcDownloadNotice').classList.toggle('hidden', frpcReady);
+  $('downloadFrpcButton').disabled = frpcDownloadBusy || !frpcDownloadSupported;
+  $('downloadFrpcButton').textContent = frpcDownloadBusy ? '下载中…' : '下载最新版';
+  $('frpcDownloadHint').textContent = frpcDownloadSupported
+    ? '将从 FRP 官方 GitHub Release 下载适用于 ' + (state.frpc_platform || '当前平台') + ' 的 frpc，校验 SHA256 后自动配置。'
+    : '当前平台 ' + (state.frpc_platform || '') + ' 暂不支持自动下载，请手动选择 frpc。';
+
   $('launchAtLogin').checked = Boolean(state.launch_at_login);
   $('launchAtLogin').disabled = !state.launch_at_login_supported;
   $('dataDir').textContent = state.data_dir || '—';
@@ -1221,6 +1232,24 @@ $('chooseFrpcButton').addEventListener('click', async () => {
     if (value) $('frpcPath').value = value;
   } catch (err) {
     showMessage(String(err), 'error');
+  }
+});
+
+$('downloadFrpcButton').addEventListener('click', async () => {
+  if (frpcDownloadBusy) return;
+  frpcDownloadBusy = true;
+  if (lastState) render(lastState);
+  try {
+    const result = await call('DownloadLatestFRPC');
+    const state = await call('GetState');
+    render(state);
+    $('frpcPath').value = result.path || state.settings?.frpc_path || '';
+    showMessage('frpc v' + result.version + ' 下载并配置完成', 'success');
+  } catch (err) {
+    showMessage('下载 frpc 失败：' + String(err), 'error');
+  } finally {
+    frpcDownloadBusy = false;
+    if (lastState) render(lastState);
   }
 });
 

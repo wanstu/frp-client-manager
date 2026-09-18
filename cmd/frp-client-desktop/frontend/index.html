@@ -410,6 +410,13 @@
         <h3>程序路径</h3>
         <label>frpc 可执行文件</label>
         <div class="field-row"><input id="frpcPath" type="text"><button id="chooseFrpcButton" class="button">选择</button></div>
+        <div id="frpcDownloadNotice" class="frpc-download-notice hidden">
+          <div>
+            <strong>未检测到可用的 frpc</strong>
+            <small id="frpcDownloadHint">可以自动下载适用于当前平台的官方 frpc。</small>
+          </div>
+          <button id="downloadFrpcButton" class="button primary">下载最新版</button>
+        </div>
 
         <h3>启动行为</h3>
         <label class="switch-row">

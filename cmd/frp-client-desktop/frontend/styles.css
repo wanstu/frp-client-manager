@@ -89,6 +89,13 @@ input[type="text"] { width: 100%; border: 1px solid #d7dee8; border-radius: 8px;
 .switch-row span small { display: block; margin-top: 4px; color: #7a8798; }
 .switch-row input { width: 18px; height: 18px; accent-color: #2563eb; }
 .settings-actions { padding-top: 7px; }
+.frpc-download-notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 13px; border: 1px solid #cfe0fb; border-radius: 9px; background: #f3f7ff;
+}
+.frpc-download-notice strong { display: block; font-size: 13px; color: #284b7d; }
+.frpc-download-notice small { display: block; margin-top: 4px; color: #647a99; line-height: 1.45; }
+.frpc-download-notice.hidden { display: none; }
 .hint { margin: 10px 0 0; color: #8090a4; font-size: 12px; }
 .message {
   margin-bottom: 16px; border-radius: 9px; padding: 10px 13px; font-size: 13px;
