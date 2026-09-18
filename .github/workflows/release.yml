@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+      - name: Check frontend
+        shell: pwsh
+        run: |
+          node --check cmd/frp-client-desktop/frontend/app.js
+          node scripts/check-frontend.mjs
+
+      - name: Test
+        shell: pwsh
+        run: go test ./...
+
+      - name: Vet
+        shell: pwsh
+        run: go vet ./...
+
+      - name: Build production EXE
+        shell: pwsh
+        run: ./scripts/build.ps1
+
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item cmd/frp-client-desktop/build/bin/frp-client-manager.exe dist/frp-client-manager-windows-amd64.exe
+          (Get-FileHash dist/frp-client-manager-windows-amd64.exe -Algorithm SHA256).Hash.ToLower() + "  frp-client-manager-windows-amd64.exe" | Set-Content -NoNewline dist/frp-client-manager-windows-amd64.exe.sha256
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            dist/frp-client-manager-windows-amd64.exe `
+            dist/frp-client-manager-windows-amd64.exe.sha256 `
+            --repo "${{ github.repository }}" `
+            --verify-tag `
+            --title "FRP Client Manager ${{ github.ref_name }}" `
+            --generate-notes

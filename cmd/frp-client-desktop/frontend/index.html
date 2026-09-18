@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FRP Client Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">F</div>
+      <div><strong>FRP Client</strong><span>Manager</span></div>
+    </div>
+    <nav>
+      <button class="nav-item active" data-page="status">运行状态</button>
+      <button class="nav-item" data-page="connections">连接配置</button>
+      <button class="nav-item" data-page="config">原始配置</button>
+      <button class="nav-item" data-page="settings">设置</button>
+      <button class="nav-item" data-page="about">关于</button>
+    </nav>
+    <div class="sidebar-footer">
+      <div id="sideStatusDot" class="status-dot"></div>
+      <div><div id="sideStatusText">读取中</div><small id="sidePid">PID —</small></div>
+    </div>
+  </aside>
+
+  <main>
+    <header>
+      <div><h1 id="pageTitle">运行状态</h1><p id="pageSubtitle">管理本机 frpc 进程和连接配置</p></div>
+      <button id="refreshButton" class="button ghost">刷新</button>
+    </header>
+
+    <div id="message" class="message hidden"></div>
+
+    <section class="page active" data-page-panel="status">
+      <div class="hero-card">
+        <div>
+          <div class="eyebrow">FRPC STATUS</div>
+          <div class="hero-row">
+            <div id="heroDot" class="hero-dot"></div>
+            <div><h2 id="heroState">正在读取</h2><p id="heroDetail">等待后端状态</p></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="startButton" class="button primary">全部启动</button>
+          <button id="stopButton" class="button danger">全部停止</button>
+          <button id="restartButton" class="button">全部重启</button>
+        </div>
+      </div>
+
+      <article class="card">
+        <div class="card-header">
+          <div><h3>连接实例</h3><p>每个配置文件对应一个独立 frpc 进程，可同时运行。</p></div>
+          <button id="addProfileFromStatusButton" class="button primary">添加连接</button>
+        </div>
+        <div id="profileStatusList" class="profile-status-list"></div>
+      </article>
+
+      <div class="grid stats">
+        <article class="card"><span>当前连接 PID</span><strong id="pidValue">—</strong></article>
+        <article class="card"><span>当前连接启动时间</span><strong id="startedAtValue">—</strong></article>
+        <article class="card"><span>当前连接</span><strong id="managedValue">—</strong></article>
+        <article class="card"><span>管理器开机启动</span><strong id="autostartValue">—</strong></article>
+      </div>
+
+      <article class="card">
+        <div class="card-header"><div><h3>运行日志</h3><p>显示最近 120 行 frpc 输出</p></div></div>
+        <pre id="logOutput" class="log-output">暂无日志</pre>
+      </article>
+    </section>
+
+    <section class="page" data-page-panel="connections">
+      <article class="card visual-toolbar">
+        <div>
+          <h3>可视化连接配置</h3>
+          <div class="profile-switch-row">
+            <select id="visualProfileSelect" class="profile-select" aria-label="当前连接配置"></select>
+            <p id="visualConfigPath">读取当前 frpc.toml</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="reloadVisualButton" class="button ghost">重新读取</button>
+          <button id="previewVisualButton" class="button">预览 TOML</button>
+          <button id="saveVisualButton" class="button primary">保存配置</button>
+          <button id="saveRestartVisualButton" class="button">保存并重启</button>
+        </div>
+      </article>
+
+      <div id="visualUnavailable" class="card visual-unavailable hidden">
+        <h3>此配置暂不能安全地用可视化编辑</h3>
+        <p id="visualUnavailableReason"></p>
+        <button class="button" data-open-page="config">转到原始配置</button>
+      </div>
+
+      <div id="visualWorkspace" class="visual-workspace hidden">
+        <div class="subtabs">
+          <button class="subtab active" data-config-tab="server">服务器连接</button>
+          <button class="subtab" data-config-tab="proxies">代理映射 <span id="proxyCountBadge" class="count-badge">0</span></button>
+          <button class="subtab" data-config-tab="visitors">Visitor <span id="visitorCountBadge" class="count-badge">0</span></button>
+        </div>
+
+        <div class="config-panel active" data-config-panel="server">
+          <article class="card form-card">
+            <div class="card-header">
+              <div><h3>frps 服务器</h3><p>最常用的连接、认证与传输参数。</p></div>
+            </div>
+            <div class="form-grid">
+              <label><span>服务器地址</span><input id="vcServerAddr" type="text" placeholder="frps.example.com"></label>
+              <label><span>服务器端口</span><input id="vcServerPort" type="number" min="1" max="65535"></label>
+              <label><span>用户前缀</span><input id="vcUser" type="text" placeholder="可选"></label>
+              <label><span>Client ID</span><input id="vcClientID" type="text" placeholder="可选"></label>
+              <label><span>认证方式</span><select id="vcAuthMethod"><option value="token">Token</option><option value="oidc">OIDC</option></select></label>
+              <label id="vcTokenField"><span>Token</span><input id="vcAuthToken" type="password" autocomplete="off" placeholder="frps 与 frpc 保持一致"></label>
+              <label><span>连接协议</span><select id="vcProtocol"><option>tcp</option><option>kcp</option><option>quic</option><option>websocket</option><option>wss</option></select></label>
+              <label><span>Wire Protocol</span><select id="vcWireProtocol"><option value="">默认 v1</option><option value="v1">v1</option><option value="v2">v2</option></select></label>
+            </div>
+
+            <div class="switch-grid">
+              <label class="switch-row compact"><span><strong>TLS</strong><small>FRP 0.50+ 默认开启。</small></span><input id="vcTLSEnable" type="checkbox"></label>
+              <label class="switch-row compact"><span><strong>TCP Mux</strong><small>复用控制连接，需与服务端兼容。</small></span><input id="vcTCPMux" type="checkbox"></label>
+              <label class="switch-row compact"><span><strong>首次登录失败即退出</strong><small>关闭后会持续重连 frps。</small></span><input id="vcLoginFailExit" type="checkbox"></label>
+            </div>
+          </article>
+
+          <article id="oidcCard" class="card form-card hidden">
+            <h3>OIDC 认证</h3>
+            <div class="form-grid">
+              <label><span>Client ID</span><input id="vcOIDCClientID" type="text"></label>
+              <label><span>Client Secret</span><input id="vcOIDCClientSecret" type="password" autocomplete="off"></label>
+              <label><span>Audience</span><input id="vcOIDCAudience" type="text"></label>
+              <label><span>Scope</span><input id="vcOIDCScope" type="text"></label>
+              <label class="span-2"><span>Token Endpoint URL</span><input id="vcOIDCTokenEndpoint" type="text"></label>
+              <label><span>Trusted CA</span><input id="vcOIDCCA" type="text"></label>
+              <label><span>Proxy URL</span><input id="vcOIDCProxy" type="text"></label>
+            </div>
+            <label class="switch-row compact"><span><strong>跳过 OIDC TLS 校验</strong><small>仅调试时使用。</small></span><input id="vcOIDCSkipVerify" type="checkbox"></label>
+          </article>
+
+          <details class="card details-card">
+            <summary>连接与 TLS 高级设置</summary>
+            <div class="details-body">
+              <div class="form-grid">
+                <label><span>预连接池数量</span><input id="vcPoolCount" type="number" min="0"></label>
+                <label><span>连接超时（秒）</span><input id="vcDialTimeout" type="number"></label>
+                <label><span>TCP Keepalive（秒）</span><input id="vcDialKeepalive" type="number"></label>
+                <label><span>TCP Mux Keepalive（秒）</span><input id="vcMuxKeepalive" type="number"></label>
+                <label><span>绑定本地 IP</span><input id="vcConnectLocalIP" type="text"></label>
+                <label><span>上游代理 URL</span><input id="vcProxyURL" type="text" placeholder="http:// / socks5:// / ntlm://"></label>
+                <label><span>心跳间隔（秒）</span><input id="vcHeartbeatInterval" type="number"></label>
+                <label><span>心跳超时（秒）</span><input id="vcHeartbeatTimeout" type="number"></label>
+                <label><span>TLS Cert</span><input id="vcTLSCert" type="text"></label>
+                <label><span>TLS Key</span><input id="vcTLSKey" type="text"></label>
+                <label><span>TLS Trusted CA</span><input id="vcTLSCA" type="text"></label>
+                <label><span>TLS Server Name</span><input id="vcTLSServerName" type="text"></label>
+              </div>
+              <label class="switch-row compact"><span><strong>禁用 Custom TLS First Byte</strong><small>新版 FRP 默认启用此选项。</small></span><input id="vcDisableTLSFirstByte" type="checkbox"></label>
+              <h4>QUIC</h4>
+              <div class="form-grid">
+                <label><span>Keepalive Period</span><input id="vcQUICKeepalive" type="number"></label>
+                <label><span>Max Idle Timeout</span><input id="vcQUICIdle" type="number"></label>
+                <label><span>Max Incoming Streams</span><input id="vcQUICStreams" type="number"></label>
+              </div>
+            </div>
+          </details>
+
+          <details class="card details-card">
+            <summary>管理接口、日志与其他全局设置</summary>
+            <div class="details-body">
+              <h4>frpc Web Server / API</h4>
+              <div class="form-grid">
+                <label><span>监听地址</span><input id="vcWebAddr" type="text" placeholder="127.0.0.1"></label>
+                <label><span>监听端口</span><input id="vcWebPort" type="number" min="0" max="65535"></label>
+                <label><span>用户名</span><input id="vcWebUser" type="text"></label>
+                <label><span>密码</span><input id="vcWebPassword" type="password" autocomplete="off"></label>
+              </div>
+              <label class="switch-row compact"><span><strong>启用 pprof</strong><small>仅在排查性能问题时开启。</small></span><input id="vcPprof" type="checkbox"></label>
+
+              <h4>日志</h4>
+              <div class="form-grid">
+                <label><span>输出位置</span><input id="vcLogTo" type="text" placeholder="console 或文件路径"></label>
+                <label><span>级别</span><select id="vcLogLevel"><option>trace</option><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label>
+                <label><span>保留天数</span><input id="vcLogMaxDays" type="number" min="0"></label>
+                <label><span>DNS Server</span><input id="vcDNSServer" type="text"></label>
+                <label><span>NAT STUN Server</span><input id="vcStunServer" type="text"></label>
+                <label><span>UDP Packet Size</span><input id="vcUDPPacketSize" type="number" min="1"></label>
+              </div>
+
+              <h4>其他</h4>
+              <div class="form-grid">
+                <label class="span-2"><span>Includes（每行一个 glob）</span><textarea id="vcIncludes" class="small-editor" placeholder="./confd/*.toml"></textarea></label>
+                <label class="span-2"><span>Client Metadata（每行 key=value）</span><textarea id="vcMetadata" class="small-editor"></textarea></label>
+                <label class="span-2"><span>Feature Gates（每行 key=true/false）</span><textarea id="vcFeatureGates" class="small-editor" placeholder="VirtualNet=true"></textarea></label>
+                <label><span>VirtualNet 地址</span><input id="vcVirtualNetAddress" type="text" placeholder="100.86.1.1/24"></label>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="config-panel" data-config-panel="proxies">
+          <div class="config-split">
+            <article class="card list-card">
+              <div class="card-header">
+                <div><h3>代理映射</h3><p>每条映射可单独启停。</p></div>
+                <button id="addProxyButton" class="button primary">新增</button>
+              </div>
+              <div id="proxyList" class="config-list"></div>
+            </article>
+
+            <article id="proxyEditorCard" class="card form-card editor-card">
+              <div id="proxyEmpty" class="empty-state">选择一条代理，或点击“新增”。</div>
+              <div id="proxyEditor" class="hidden">
+                <div class="card-header">
+                  <div><h3 id="proxyEditorTitle">代理</h3><p id="proxyEditorSummary"></p></div>
+                  <button id="deleteProxyButton" class="button danger">删除</button>
+                </div>
+
+                <div class="form-grid">
+                  <label><span>名称</span><input id="pxName" type="text"></label>
+                  <label><span>类型</span><select id="pxType"></select></label>
+                </div>
+                <label class="switch-row compact"><span><strong>启用</strong><small>写入每条代理的 enabled，推荐替代全局 start 白名单。</small></span><input id="pxEnabled" type="checkbox"></label>
+
+                <h4>本地服务</h4>
+                <div class="form-grid">
+                  <label><span>Local IP</span><input id="pxLocalIP" type="text" placeholder="127.0.0.1"></label>
+                  <label><span>Local Port</span><input id="pxLocalPort" type="number" min="1" max="65535"></label>
+                  <label class="span-2"><span>Client Plugin</span><select id="pxPluginType"></select><small>选择 Plugin 后，Local IP / Port 会由插件接管。</small></label>
+                </div>
+
+                <div id="pxRemoteFields">
+                  <h4>远端监听</h4>
+                  <div class="form-grid">
+                    <label><span>Remote Port</span><input id="pxRemotePort" type="number" min="0" max="65535"><small>TCP/UDP 可填 0 让 frps 随机分配。</small></label>
+                  </div>
+                </div>
+
+                <div id="pxDomainFields" class="hidden">
+                  <h4>域名路由</h4>
+                  <div class="form-grid">
+                    <label class="span-2"><span>Custom Domains（逗号或换行分隔）</span><textarea id="pxDomains" class="small-editor"></textarea></label>
+                    <label><span>Subdomain</span><input id="pxSubdomain" type="text"></label>
+                    <label id="pxMultiplexerField"><span>Multiplexer</span><select id="pxMultiplexer"><option value="httpconnect">httpconnect</option></select></label>
+                    <label id="pxLocationsField" class="span-2"><span>Locations（逗号或换行分隔）</span><input id="pxLocations" type="text" placeholder="/,/api"></label>
+                    <label id="pxHTTPUserField"><span>HTTP 用户名</span><input id="pxHTTPUser" type="text"></label>
+                    <label id="pxHTTPPasswordField"><span>HTTP 密码</span><input id="pxHTTPPassword" type="password" autocomplete="off"></label>
+                    <label id="pxRouteUserField"><span>Route By HTTP User</span><input id="pxRouteUser" type="text"></label>
+                    <label id="pxHostRewriteField"><span>Host Header Rewrite</span><input id="pxHostRewrite" type="text"></label>
+                  </div>
+                </div>
+
+                <div id="pxSecretFields" class="hidden">
+                  <h4>安全隧道</h4>
+                  <div class="form-grid">
+                    <label><span>Secret Key</span><input id="pxSecretKey" type="password" autocomplete="off"></label>
+                    <label><span>Allow Users</span><input id="pxAllowUsers" type="text" placeholder="*,user1,user2"></label>
+                  </div>
+                </div>
+
+                <div id="pxPluginFields" class="hidden">
+                  <h4>Plugin 参数</h4>
+                  <div class="form-grid">
+                    <label><span>Unix Path</span><input id="pxPluginUnixPath" type="text"></label>
+                    <label><span>Local Addr</span><input id="pxPluginLocalAddr" type="text" placeholder="127.0.0.1:80"></label>
+                    <label><span>Local Path</span><input id="pxPluginLocalPath" type="text"></label>
+                    <label><span>Strip Prefix</span><input id="pxPluginStripPrefix" type="text"></label>
+                    <label><span>用户名</span><input id="pxPluginUsername" type="text"></label>
+                    <label><span>密码</span><input id="pxPluginPassword" type="password" autocomplete="off"></label>
+                    <label><span>HTTP 用户名</span><input id="pxPluginHTTPUser" type="text"></label>
+                    <label><span>HTTP 密码</span><input id="pxPluginHTTPPassword" type="password" autocomplete="off"></label>
+                    <label><span>Cert Path</span><input id="pxPluginCert" type="text"></label>
+                    <label><span>Key Path</span><input id="pxPluginKey" type="text"></label>
+                    <label><span>Host Header Rewrite</span><input id="pxPluginHostRewrite" type="text"></label>
+                    <label class="span-2"><span>Request Headers（每行 key=value）</span><textarea id="pxPluginRequestHeaders" class="small-editor"></textarea></label>
+                  </div>
+                </div>
+
+                <details class="inline-details">
+                  <summary>传输、带宽与负载均衡</summary>
+                  <div class="details-body">
+                    <div class="switch-grid">
+                      <label class="switch-row compact"><span><strong>加密流量</strong></span><input id="pxEncryption" type="checkbox"></label>
+                      <label class="switch-row compact"><span><strong>压缩流量</strong></span><input id="pxCompression" type="checkbox"></label>
+                    </div>
+                    <div class="form-grid">
+                      <label><span>带宽限制</span><input id="pxBandwidth" type="text" placeholder="1MB"></label>
+                      <label><span>限制位置</span><select id="pxBandwidthMode"><option value="client">client</option><option value="server">server</option></select></label>
+                      <label><span>Proxy Protocol</span><select id="pxProxyProtocol"><option value="">自动/关闭</option><option value="v1">v1</option><option value="v2">v2</option></select></label>
+                      <label><span>负载均衡 Group</span><input id="pxGroup" type="text"></label>
+                      <label><span>Group Key</span><input id="pxGroupKey" type="password" autocomplete="off"></label>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="inline-details">
+                  <summary>健康检查</summary>
+                  <div class="details-body">
+                    <div class="form-grid">
+                      <label><span>类型</span><select id="pxHealthType"><option value="">关闭</option><option value="tcp">tcp</option><option value="http">http</option></select></label>
+                      <label><span>超时（秒）</span><input id="pxHealthTimeout" type="number"></label>
+                      <label><span>连续失败次数</span><input id="pxHealthMaxFailed" type="number"></label>
+                      <label><span>间隔（秒）</span><input id="pxHealthInterval" type="number"></label>
+                      <label id="pxHealthPathField" class="span-2"><span>HTTP Path</span><input id="pxHealthPath" type="text" placeholder="/status"></label>
+                      <label id="pxHealthHeadersField" class="span-2"><span>HTTP Headers（每行 key=value）</span><textarea id="pxHealthHeaders" class="small-editor"></textarea></label>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="inline-details">
+                  <summary>Headers、Metadata 与 NAT</summary>
+                  <div class="details-body">
+                    <div class="form-grid">
+                      <label class="span-2"><span>Request Headers（每行 key=value）</span><textarea id="pxRequestHeaders" class="small-editor"></textarea></label>
+                      <label class="span-2"><span>Response Headers（每行 key=value）</span><textarea id="pxResponseHeaders" class="small-editor"></textarea></label>
+                      <label class="span-2"><span>Metadata（每行 key=value）</span><textarea id="pxMetadata" class="small-editor"></textarea></label>
+                      <label class="span-2"><span>Annotations（每行 key=value）</span><textarea id="pxAnnotations" class="small-editor"></textarea></label>
+                    </div>
+                    <label class="switch-row compact"><span><strong>XTCP 禁用 Assisted Addresses</strong><small>只使用 STUN 发现的公网地址。</small></span><input id="pxDisableAssisted" type="checkbox"></label>
+                  </div>
+                </details>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="config-panel" data-config-panel="visitors">
+          <div class="config-split">
+            <article class="card list-card">
+              <div class="card-header">
+                <div><h3>Visitor</h3><p>访问 STCP / SUDP / XTCP 服务。</p></div>
+                <button id="addVisitorButton" class="button primary">新增</button>
+              </div>
+              <div id="visitorList" class="config-list"></div>
+            </article>
+
+            <article class="card form-card editor-card">
+              <div id="visitorEmpty" class="empty-state">选择一个 Visitor，或点击“新增”。</div>
+              <div id="visitorEditor" class="hidden">
+                <div class="card-header">
+                  <div><h3 id="visitorEditorTitle">Visitor</h3><p>本地访问入口与远端安全隧道的对应关系。</p></div>
+                  <button id="deleteVisitorButton" class="button danger">删除</button>
+                </div>
+                <div class="form-grid">
+                  <label><span>名称</span><input id="vsName" type="text"></label>
+                  <label><span>类型</span><select id="vsType"></select></label>
+                  <label><span>Server User</span><input id="vsServerUser" type="text"></label>
+                  <label><span>Server Name</span><input id="vsServerName" type="text"></label>
+                  <label><span>Secret Key</span><input id="vsSecretKey" type="password" autocomplete="off"></label>
+                  <label><span>Bind Addr</span><input id="vsBindAddr" type="text" placeholder="127.0.0.1"></label>
+                  <label><span>Bind Port</span><input id="vsBindPort" type="number"><small>STCP/XTCP 可用负数表示不直接绑定端口。</small></label>
+                </div>
+                <div class="switch-grid">
+                  <label class="switch-row compact"><span><strong>启用</strong></span><input id="vsEnabled" type="checkbox"></label>
+                  <label class="switch-row compact"><span><strong>加密</strong></span><input id="vsEncryption" type="checkbox"></label>
+                  <label class="switch-row compact"><span><strong>压缩</strong></span><input id="vsCompression" type="checkbox"></label>
+                </div>
+                <div id="visitorXTCPFields">
+                  <h4>XTCP</h4>
+                  <div class="form-grid">
+                    <label><span>每小时最大打洞次数</span><input id="vsMaxRetries" type="number"></label>
+                    <label><span>最小重试间隔（秒）</span><input id="vsMinRetry" type="number"></label>
+                    <label><span>Fallback To</span><input id="vsFallbackTo" type="text"></label>
+                    <label><span>Fallback Timeout（ms）</span><input id="vsFallbackTimeout" type="number"></label>
+                  </div>
+                  <div class="switch-grid">
+                    <label class="switch-row compact"><span><strong>保持隧道开启</strong></span><input id="vsKeepTunnel" type="checkbox"></label>
+                    <label class="switch-row compact"><span><strong>禁用 Assisted Addresses</strong></span><input id="vsDisableAssisted" type="checkbox"></label>
+                  </div>
+                </div>
+                <details class="inline-details">
+                  <summary>VirtualNet Visitor Plugin</summary>
+                  <div class="details-body">
+                    <div class="form-grid">
+                      <label><span>Plugin</span><select id="vsPluginType"><option value="">不使用</option><option value="virtual_net">virtual_net</option></select></label>
+                      <label><span>Destination IP</span><input id="vsDestinationIP" type="text" placeholder="100.86.0.1"></label>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" data-page-panel="config">
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <h3>原始 frpc 配置</h3>
+            <div class="profile-switch-row">
+              <select id="rawProfileSelect" class="profile-select" aria-label="当前连接配置"></select>
+              <p id="configPathHint">—</p>
+            </div>
+          </div>
+          <div class="actions">
+            <button id="loadConfigButton" class="button ghost">重新读取</button>
+            <button id="validateButton" class="button">frpc verify</button>
+            <button id="saveConfigButton" class="button primary">保存</button>
+          </div>
+        </div>
+        <textarea id="configEditor" class="editor" spellcheck="false" placeholder="# 在这里编辑 frpc.toml"></textarea>
+        <div class="hint">适合模板、YAML/JSON 或可视化页面尚未覆盖的未来字段。保存时会自动保留一个 <code>.bak</code> 备份。</div>
+      </article>
+    </section>
+
+    <section class="page" data-page-panel="settings">
+      <article class="card settings-card">
+        <h3>程序路径</h3>
+        <label>frpc 可执行文件</label>
+        <div class="field-row"><input id="frpcPath" type="text"><button id="chooseFrpcButton" class="button">选择</button></div>
+
+        <h3>启动行为</h3>
+        <label class="switch-row">
+          <span><strong>登录 Windows 时启动管理器</strong><small>通过当前用户注册表启动，并以托盘模式进入后台。</small></span>
+          <input id="launchAtLogin" type="checkbox">
+        </label>
+        <div class="settings-actions"><button id="saveSettingsButton" class="button primary">保存设置</button></div>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div><h3>连接配置</h3><p>每个配置文件对应一个可独立启动的 frpc 实例。</p></div>
+          <button id="addProfileButton" class="button primary">添加连接</button>
+        </div>
+        <div id="profileSettingsList" class="profile-settings-list"></div>
+      </article>
+
+      <article class="card">
+        <h3>数据目录</h3>
+        <code id="dataDir">—</code>
+        <p class="hint">默认连接沿用原来的 PID/日志文件；其他连接保存在 <code>instances</code> 子目录中。</p>
+      </article>
+    </section>
+
+    <section class="page" data-page-panel="about">
+      <article class="card about-card">
+        <div class="brand-mark large">F</div>
+        <h2>FRP Client Manager</h2>
+        <p>一个轻量的 Windows frpc 桌面管理器。</p>
+        <div class="about-grid">
+          <div><span>桌面框架</span><strong>Wails 2</strong></div>
+          <div><span>后端</span><strong>Go</strong></div>
+          <div><span>托盘</span><strong>gogpu/systray</strong></div>
+          <div><span>可视化配置</span><strong>FRP TOML</strong></div>
+        </div>
+        <p class="hint">窗口、任务栏、EXE 与托盘共用同一图标源。关闭主窗口只会隐藏到系统托盘。</p>
+      </article>
+    </section>
+  </main>
+</div>
+
+<dialog id="profileDialog" class="preview-dialog profile-dialog">
+  <form id="profileForm">
+    <div class="dialog-header">
+      <div><h3 id="profileDialogTitle">添加连接</h3><p>选择一个 frpc 配置文件，并设置是否随管理器自动启动。</p></div>
+      <button id="closeProfileDialogButton" type="button" class="button ghost">关闭</button>
+    </div>
+    <input id="profileID" type="hidden">
+    <div class="form-grid">
+      <label><span>连接名称</span><input id="profileName" type="text" placeholder="例如：家里服务器" required></label>
+      <label class="span-2"><span>配置文件</span>
+        <div class="field-row"><input id="profileConfigPath" type="text" required><button id="chooseProfileConfigButton" type="button" class="button">选择</button></div>
+      </label>
+    </div>
+    <label class="switch-row compact">
+      <span><strong>管理器启动后自动启动此连接</strong><small>多个连接可以同时设置为自动启动。</small></span>
+      <input id="profileAutoStart" type="checkbox">
+    </label>
+    <div class="settings-actions"><button id="saveProfileButton" type="submit" class="button primary">保存连接</button></div>
+  </form>
+</dialog>
+
+<dialog id="visualPreviewDialog" class="preview-dialog">
+  <div class="dialog-header">
+    <div><h3>生成的 TOML</h3><p>这是可视化配置保存时将写入的内容。</p></div>
+    <button id="closePreviewButton" class="button ghost">关闭</button>
+  </div>
+  <pre id="visualPreviewOutput" class="log-output preview-output"></pre>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

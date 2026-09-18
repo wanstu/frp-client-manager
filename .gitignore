@@ -1,0 +1,22 @@
+# Wails generated/build output
+cmd/frp-client-desktop/build/bin/
+cmd/frp-client-desktop/build/appicon.png
+cmd/frp-client-desktop/build/windows/icon.ico
+cmd/frp-client-desktop/frontend/wailsjs/
+dist/
+
+# Go
+*.exe
+*.test
+*.out
+
+# Editors
+.idea/
+.vscode/
+
+# Local FRP files
+frpc.exe
+frpc.toml
+frpc.ini
+frpc.yaml
+frpc.yml
