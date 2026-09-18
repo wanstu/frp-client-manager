@@ -10,12 +10,12 @@ import (
 	"strings"
 	"sync"
 
-	"frp-client-manager/internal/autostart"
 	"frp-client-manager/internal/config"
 	"frp-client-manager/internal/frpc"
 	"frp-client-manager/internal/frpconfig"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	kitautostart "github.com/wanstu/wails-desktop-kit/autostart"
 )
 
 type ProfileState struct {
@@ -44,7 +44,8 @@ type VisualConfigCatalog struct {
 }
 
 type App struct {
-	store *config.Store
+	store         *config.Store
+	launchAtLogin *kitautostart.Manager
 
 	mu           sync.RWMutex
 	ctx          context.Context
@@ -57,7 +58,20 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{store: store, managers: make(map[string]*frpc.Manager)}, nil
+	launchAtLogin, err := kitautostart.New(kitautostart.Config{
+		ID:          "frp-client-manager",
+		DisplayName: "FRP Client Manager",
+		Comment:     "Manage multiple frpc connections",
+		Arguments:   []string{"--autostart"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &App{
+		store:         store,
+		launchAtLogin: launchAtLogin,
+		managers:      make(map[string]*frpc.Manager),
+	}, nil
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -94,7 +108,7 @@ func (a *App) GetState() (UIState, error) {
 	if err != nil {
 		return UIState{}, err
 	}
-	launchEnabled, err := autostart.Enabled()
+	launchEnabled, err := a.launchAtLogin.Enabled()
 	if err != nil {
 		return UIState{}, err
 	}
@@ -122,7 +136,7 @@ func (a *App) GetState() (UIState, error) {
 		Process:                activeProcess,
 		Profiles:               profiles,
 		RunningCount:           runningCount,
-		LaunchAtLoginSupported: autostart.Supported(),
+		LaunchAtLoginSupported: a.launchAtLogin.Supported(),
 		LaunchAtLogin:          launchEnabled,
 		DataDir:                a.store.Dir(),
 		StartupError:           startupError,
@@ -150,10 +164,10 @@ func (a *App) SaveSettings(settings config.Settings) (UIState, error) {
 }
 
 func (a *App) SetLaunchAtLogin(value bool) (UIState, error) {
-	if value && !autostart.Supported() {
+	if value && !a.launchAtLogin.Supported() {
 		return UIState{}, errors.New("当前平台不支持开机启动")
 	}
-	if err := autostart.Set(value); err != nil {
+	if err := a.launchAtLogin.SetEnabled(value); err != nil {
 		return UIState{}, err
 	}
 	if ctx := a.runtimeContext(); ctx != nil {

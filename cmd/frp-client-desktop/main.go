@@ -1,16 +1,12 @@
 package main
 
 import (
-	"context"
 	"embed"
-	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	desktopkit "github.com/wanstu/wails-desktop-kit"
 )
 
 //go:embed all:frontend
@@ -20,7 +16,7 @@ var embeddedFrontend embed.FS
 var appIcon []byte
 
 func main() {
-	startHidden, err := launchOptions(os.Args[1:])
+	launch, err := desktopkit.ParseLaunchOptions(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "frp-client:", err)
 		os.Exit(1)
@@ -30,55 +26,73 @@ func main() {
 		fmt.Fprintln(os.Stderr, "frp-client:", err)
 		os.Exit(1)
 	}
-	if err := runDesktop(app, startHidden); err != nil {
+	if err := runDesktop(app, launch); err != nil {
 		fmt.Fprintln(os.Stderr, "frp-client:", err)
 		os.Exit(1)
 	}
 }
 
-func launchOptions(args []string) (bool, error) {
-	flags := flag.NewFlagSet("frp-client", flag.ContinueOnError)
-	autostart := flags.Bool("autostart", false, "start hidden after desktop login")
-	if err := flags.Parse(args); err != nil {
-		return false, err
-	}
-	if flags.NArg() != 0 {
-		return false, fmt.Errorf("only --autostart is supported")
-	}
-	return *autostart, nil
-}
-
-func runDesktop(app *App, startHidden bool) error {
+func runDesktop(app *App, launch desktopkit.LaunchOptions) error {
 	assets, err := fs.Sub(embeddedFrontend, "frontend")
 	if err != nil {
 		return err
 	}
-	tray := newTrayManager(app, appIcon)
-	return wails.Run(&options.App{
-		Title:             "FRP Client Manager",
-		Width:             1080,
-		Height:            720,
-		MinWidth:          860,
-		MinHeight:         600,
-		StartHidden:       startHidden && traySupported,
-		HideWindowOnClose: traySupported,
-		AssetServer:       &assetserver.Options{Assets: assets},
-		BackgroundColour:  &options.RGBA{R: 245, G: 247, B: 250, A: 1},
-		OnStartup: func(ctx context.Context) {
-			app.startup(ctx)
-			tray.Startup(ctx)
+
+	window := desktopkit.DefaultWindowConfig()
+	window.Width = 1080
+	window.Height = 720
+	window.MinWidth = 860
+	window.MinHeight = 600
+	window.HidePolicy = desktopkit.HideAlways
+	window.StartHiddenOnAutoStart = true
+	window.Background = desktopkit.Color{R: 245, G: 247, B: 250, A: 1}
+
+	startAll := desktopkit.Action("启动全部连接", func(*desktopkit.Controller) error {
+		_, err := app.StartAllProfiles()
+		return err
+	})
+	stopAll := desktopkit.Action("停止全部连接", func(*desktopkit.Controller) error {
+		_, err := app.StopAllProfiles()
+		return err
+	})
+	restartAll := desktopkit.Action("重启全部连接", func(*desktopkit.Controller) error {
+		_, err := app.RestartAllProfiles()
+		return err
+	})
+
+	quitKeep := desktopkit.Action("退出（保留 frpc）", func(controller *desktopkit.Controller) error {
+		controller.Quit()
+		return nil
+	})
+	quitStop := desktopkit.Action("退出并停止 frpc", func(controller *desktopkit.Controller) error {
+		if _, err := app.StopAllProfiles(); err != nil {
+			return err
+		}
+		controller.Quit()
+		return nil
+	})
+	quitStop.ErrorTitle = "停止全部连接失败，未退出"
+
+	return desktopkit.Run(desktopkit.Config{
+		ID:             "frp-client-manager-v1",
+		Title:          "FRP Client Manager",
+		Assets:         assets,
+		Bind:           []interface{}{app},
+		Launch:         launch,
+		Window:         window,
+		SingleInstance: true,
+		Tray: desktopkit.TrayConfig{
+			Enabled:            true,
+			Icon:               appIcon,
+			AutoStart:          app.launchAtLogin,
+			LaunchAtLoginLabel: "开机启动管理器",
+			Items:              []desktopkit.TrayItem{startAll, stopAll, restartAll},
+			FooterItems:        []desktopkit.TrayItem{quitKeep, quitStop},
+			DisableQuit:        true,
 		},
-		OnDomReady: tray.DomReady,
-		OnShutdown: func(ctx context.Context) {
-			tray.Shutdown(ctx)
-			app.shutdown(ctx)
+		Hooks: desktopkit.Hooks{
+			Startup:  app.startup,
+			Shutdown: app.shutdown,
 		},
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: "frp-client-manager-v1",
-			OnSecondInstanceLaunch: func(_ options.SecondInstanceData) {
-				tray.ShowWindow()
-			},
-		},
-		Bind: []interface{}{app},
 	})
 }
