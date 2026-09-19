@@ -4,7 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FRP Client Manager</title>
+  <link rel="stylesheet" href="/desktopkit/tokens.css">
+  <link rel="stylesheet" href="/desktopkit/base.css">
+  <link rel="stylesheet" href="/desktopkit/components.css">
+  <link rel="stylesheet" href="/desktopkit/navigation.css">
   <link rel="stylesheet" href="styles.css">
+  <script src="/desktopkit/theme.js"></script>
+  <script>
+    (() => {
+      const key = 'frp-client-manager.theme';
+      let mode = 'light';
+      try {
+        const saved = localStorage.getItem(key);
+        if (saved === 'dark' || saved === 'system' || saved === 'light') mode = saved;
+      } catch (_) {
+        mode = 'light';
+      }
+      window.desktopKitTheme?.apply(mode);
+    })();
+  </script>
 </head>
 <body>
 <div class="shell">
@@ -15,7 +33,7 @@
     </div>
     <nav>
       <button class="nav-item active" data-page="status">运行状态</button>
-      <button class="nav-item" data-page="connections">连接配置</button>
+      <button class="nav-item" data-page="connections">FRP 配置</button>
       <button class="nav-item" data-page="config">原始配置</button>
       <button class="nav-item" data-page="settings">设置</button>
       <button class="nav-item" data-page="about">关于</button>
@@ -29,21 +47,36 @@
   <main>
     <header>
       <div><h1 id="pageTitle">运行状态</h1><p id="pageSubtitle">管理本机 frpc 进程和连接配置</p></div>
-      <button id="refreshButton" class="button ghost">刷新</button>
+      <div class="header-actions">
+        <span id="headerFrpcState" class="status-chip">frpc 检测中</span>
+        <button id="refreshButton" class="button ghost">刷新</button>
+      </div>
     </header>
 
     <div id="message" class="message hidden"></div>
+    <div id="systemNotice" class="system-notice hidden">
+      <div class="system-notice-mark">!</div>
+      <div class="system-notice-copy">
+        <strong id="systemNoticeTitle"></strong>
+        <p id="systemNoticeText"></p>
+      </div>
+      <button id="systemNoticeAction" class="button"></button>
+    </div>
 
     <section class="page active" data-page-panel="status">
       <div class="hero-card">
-        <div>
+        <div class="hero-main">
           <div class="eyebrow">FRPC STATUS</div>
           <div class="hero-row">
             <div id="heroDot" class="hero-dot"></div>
             <div><h2 id="heroState">正在读取</h2><p id="heroDetail">等待后端状态</p></div>
           </div>
+          <div class="hero-profile">
+            <span>当前查看</span>
+            <select id="statusProfileSelect" class="profile-select compact" aria-label="当前查看连接"></select>
+          </div>
         </div>
-        <div class="actions">
+        <div class="actions hero-actions">
           <button id="startButton" class="button primary">全部启动</button>
           <button id="stopButton" class="button danger">全部停止</button>
           <button id="restartButton" class="button">全部重启</button>
@@ -59,14 +92,17 @@
       </article>
 
       <div class="grid stats">
-        <article class="card"><span>当前连接 PID</span><strong id="pidValue">—</strong></article>
-        <article class="card"><span>当前连接启动时间</span><strong id="startedAtValue">—</strong></article>
-        <article class="card"><span>当前连接</span><strong id="managedValue">—</strong></article>
-        <article class="card"><span>管理器开机启动</span><strong id="autostartValue">—</strong></article>
+        <article class="card stat-card"><span>运行中的连接</span><strong id="runningCountValue">—</strong><small id="runningCountHint">共 — 个连接</small></article>
+        <article class="card stat-card"><span>当前连接</span><strong id="managedValue">—</strong><small id="currentStateValue">—</small></article>
+        <article class="card stat-card"><span>当前连接 PID</span><strong id="pidValue">—</strong><small id="startedAtValue">未运行</small></article>
+        <article class="card stat-card"><span>管理器开机启动</span><strong id="autostartValue">—</strong><small>可在设置中切换</small></article>
       </div>
 
       <article class="card">
-        <div class="card-header"><div><h3>运行日志</h3><p>显示最近 120 行 frpc 输出</p></div></div>
+        <div class="card-header">
+          <div><h3>运行日志</h3><p id="logDetail">当前连接最近 120 行 frpc 输出</p></div>
+          <button id="clearLogViewButton" class="button ghost">回到底部</button>
+        </div>
         <pre id="logOutput" class="log-output">暂无日志</pre>
       </article>
     </section>
@@ -407,9 +443,22 @@
 
     <section class="page" data-page-panel="settings">
       <article class="card settings-card">
-        <h3>程序路径</h3>
+        <div class="settings-section-header">
+          <div>
+            <h3>frpc 程序</h3>
+            <p>选择已有 frpc，或让管理器自动下载当前平台的官方版本。</p>
+          </div>
+          <span id="frpcReadyBadge" class="status-chip">检测中</span>
+        </div>
         <label>frpc 可执行文件</label>
-        <div class="field-row"><input id="frpcPath" type="text"><button id="chooseFrpcButton" class="button">选择</button></div>
+        <div class="field-row">
+          <input id="frpcPath" type="text" placeholder="frpc 或 frpc.exe">
+          <button id="chooseFrpcButton" class="button">选择文件</button>
+        </div>
+        <div class="field-help-row">
+          <small id="frpcPathHelp">选择文件会自动保存；手动输入路径后请点击“保存路径”。</small>
+          <button id="saveSettingsButton" class="button primary compact-button" disabled>保存路径</button>
+        </div>
         <div id="frpcDownloadNotice" class="frpc-download-notice hidden">
           <div>
             <strong>未检测到可用的 frpc</strong>
@@ -418,17 +467,38 @@
           <button id="downloadFrpcButton" class="button primary">下载最新版</button>
         </div>
 
-        <h3>启动行为</h3>
+        <div class="settings-divider"></div>
+        <div class="settings-section-header">
+          <div>
+            <h3>外观</h3>
+            <p>主题选择立即生效，并保存在当前应用中。</p>
+          </div>
+        </div>
+        <label class="setting-control-row">
+          <span><strong>界面主题</strong><small>默认保持浅色，也可以固定深色或跟随系统。</small></span>
+          <select id="themeMode" class="theme-select" aria-label="界面主题">
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+            <option value="system">跟随系统</option>
+          </select>
+        </label>
+
+        <div class="settings-divider"></div>
+        <div class="settings-section-header">
+          <div>
+            <h3>启动行为</h3>
+            <p>开关修改后立即生效，不需要额外保存。</p>
+          </div>
+        </div>
         <label class="switch-row">
-          <span><strong>登录系统时启动管理器</strong><small>使用当前系统的用户级自启动机制，并以托盘模式进入后台。</small></span>
+          <span><strong>登录系统时启动管理器</strong><small>使用当前系统的用户级自启动机制；Windows/macOS 可进入托盘，Linux 按安全策略保持窗口可恢复。</small></span>
           <input id="launchAtLogin" type="checkbox">
         </label>
-        <div class="settings-actions"><button id="saveSettingsButton" class="button primary">保存设置</button></div>
       </article>
 
       <article class="card">
         <div class="card-header">
-          <div><h3>连接配置</h3><p>每个配置文件对应一个可独立启动的 frpc 实例。</p></div>
+          <div><h3>连接实例</h3><p>每个配置文件对应一个可独立启动的 frpc 实例。</p></div>
           <button id="addProfileButton" class="button primary">添加连接</button>
         </div>
         <div id="profileSettingsList" class="profile-settings-list"></div>
@@ -452,7 +522,7 @@
           <div><span>托盘</span><strong>gogpu/systray</strong></div>
           <div><span>可视化配置</span><strong>FRP TOML</strong></div>
         </div>
-        <p class="hint">窗口、任务栏、EXE 与托盘共用同一图标源。关闭主窗口只会隐藏到系统托盘。</p>
+        <p class="hint">窗口、任务栏、EXE 与托盘共用同一图标源。关闭行为遵循当前平台的安全托盘策略。</p>
       </article>
     </section>
   </main>

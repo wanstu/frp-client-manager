@@ -7,6 +7,7 @@ import (
 	"os"
 
 	desktopkit "github.com/wanstu/wails-desktop-kit"
+	kitui "github.com/wanstu/wails-desktop-kit/ui"
 )
 
 //go:embed all:frontend
@@ -76,7 +77,7 @@ func runDesktop(app *App, launch desktopkit.LaunchOptions) error {
 	return desktopkit.Run(desktopkit.Config{
 		ID:             "frp-client-manager-v1",
 		Title:          "FRP Client Manager",
-		Assets:         assets,
+		Assets:         kitui.Mount(assets),
 		Bind:           []interface{}{app},
 		Launch:         launch,
 		Window:         window,
