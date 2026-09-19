@@ -20,4 +20,7 @@ jobs:
       build-command-unix: bash ./scripts/build.sh
       linux-package-formats: raw,deb
       linux-package-description: "FRP Client Manager desktop application"
+      linux-desktop-file: packaging/frp-client-manager.desktop
+      linux-icon-file: packaging/frp-client-manager.png
+      post-package-command-linux: bash ./scripts/verify-linux-package.sh
       publish-release: true

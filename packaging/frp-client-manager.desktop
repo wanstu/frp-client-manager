@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=FRP Client Manager
+Name[zh_CN]=FRP 客户端管理器
+Comment=Manage FRP client connections
+Comment[zh_CN]=管理 FRP 客户端连接
+Exec=/usr/bin/frp-client-manager
+TryExec=/usr/bin/frp-client-manager
+Icon=frp-client-manager
+StartupWMClass=frp-client-manager
+Terminal=false
+Categories=Network;Utility;
+StartupNotify=true
