@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    uses: wanstu/wails-desktop-kit/.github/workflows/wails-desktop.yml@b3145064740ca37c277b5347dba6a095256b46f6
+    uses: wanstu/wails-desktop-kit/.github/workflows/wails-desktop.yml@v0.2.0
     with:
       app-name: frp-client-manager
       desktop-dir: cmd/frp-client-desktop

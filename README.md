@@ -72,6 +72,8 @@ macOS:   cmd/frp-client-desktop/build/bin/frp-client-manager.app
 
 ## CI/CD
 
+桌面基础库和 reusable workflow 均固定为 Wails Desktop Kit **v0.2.0**。常规业务 API 用法保持兼容；Linux 的 HideSafe 行为详见下方运行规则。
+
 - 推送到 `master` 或向 `master` 提交 Pull Request：Windows、Ubuntu 和 macOS 三个平台分别执行前端检查、`go test ./...`、`go vet ./...` 与 Wails 生产构建。
 - CI 上传 Windows amd64 EXE、Linux amd64 可执行文件、macOS Universal（Intel + Apple Silicon）`.app.zip`，并为各产物生成 SHA-256。
 - 推送 `v*` 标签：三平台重新完整构建，全部成功后才创建 GitHub Release 并合并上传三平台产物。
