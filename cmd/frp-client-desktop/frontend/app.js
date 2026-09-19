@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 const titles = {
   status: ['运行状态', '同时管理多个独立 frpc 连接实例'],
-  connections: ['连接配置', '用表单管理 frps、代理映射和 Visitor'],
+  connections: ['FRP 配置', '编辑当前连接的 frps、代理映射和 Visitor'],
   config: ['原始配置', '直接编辑当前 frpc 配置文件'],
   settings: ['设置', '管理 frpc 路径、多个配置文件和启动行为'],
   about: ['关于', 'FRP Client Manager'],
@@ -16,6 +16,39 @@ let visualCatalog = null;
 let selectedProxyIndex = -1;
 let selectedVisitorIndex = -1;
 let frpcDownloadBusy = false;
+let settingsPathDirty = false;
+let launchToggleBusy = false;
+let noticeAction = null;
+let actionBusyCount = 0;
+
+const THEME_STORAGE_KEY = 'frp-client-manager.theme';
+const THEME_MODES = new Set(['light', 'dark', 'system']);
+
+function savedThemeMode() {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return THEME_MODES.has(value) ? value : 'light';
+  } catch (_) {
+    return 'light';
+  }
+}
+
+function applyThemeMode(mode, persist = true) {
+  const next = THEME_MODES.has(mode) ? mode : 'light';
+  if (!window.desktopKitTheme) {
+    throw new Error('Desktop Kit 主题模块未加载');
+  }
+  window.desktopKitTheme.apply(next);
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch (_) {
+      // Theme still applies for this session if persistence is unavailable.
+    }
+  }
+  if ($('themeMode')) $('themeMode').value = next;
+  return next;
+}
 
 function backend() {
   const api = window.go?.main?.App;
@@ -35,6 +68,44 @@ function showMessage(text, type = '') {
   el.className = ('message ' + type).trim();
   clearTimeout(showMessage.timer);
   showMessage.timer = setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+function setButtonBusy(button, busy, pendingText = '处理中…') {
+  if (!button) return;
+  if (busy) {
+    if (!button.hasAttribute('aria-busy')) {
+      button.dataset.originalText = button.textContent;
+      button.dataset.originalDisabled = button.disabled ? '1' : '0';
+    }
+    button.textContent = pendingText;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    return;
+  }
+  if (button.dataset.originalText) button.textContent = button.dataset.originalText;
+  button.disabled = button.dataset.originalDisabled === '1';
+  delete button.dataset.originalText;
+  delete button.dataset.originalDisabled;
+  button.removeAttribute('aria-busy');
+}
+
+function setSystemNotice(kind, title, text, actionLabel = '', action = null) {
+  const notice = $('systemNotice');
+  notice.className = 'system-notice ' + (kind || 'info');
+  $('systemNoticeTitle').textContent = title;
+  $('systemNoticeText').textContent = text;
+  noticeAction = action;
+
+  const button = $('systemNoticeAction');
+  button.textContent = actionLabel;
+  button.disabled = false;
+  button.classList.toggle('hidden', !actionLabel || typeof action !== 'function');
+  notice.classList.remove('hidden');
+}
+
+function hideSystemNotice() {
+  $('systemNotice').classList.add('hidden');
+  noticeAction = null;
 }
 
 function humanTime(value) {
@@ -212,20 +283,29 @@ function makeButton(text, className, action, disabled = false) {
   button.className = 'button ' + (className || '');
   button.textContent = text;
   button.disabled = disabled;
-  button.addEventListener('click', action);
+  button.addEventListener('click', () => action(button));
   return button;
 }
 
 function renderProfileStatusList(state) {
   const container = $('profileStatusList');
   container.textContent = '';
-  (state.profiles || []).forEach((item) => {
+  const profiles = state.profiles || [];
+  if (!profiles.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state compact-empty';
+    empty.textContent = '还没有连接配置，请先添加一个 frpc 配置。';
+    container.appendChild(empty);
+    return;
+  }
+
+  profiles.forEach((item) => {
     const profile = item.profile;
     const process = item.process || {};
     const active = profile.id === state.settings?.active_profile_id;
 
     const row = document.createElement('div');
-    row.className = 'profile-status-item';
+    row.className = 'profile-status-item' + (active ? ' is-active' : '');
 
     const main = document.createElement('div');
     main.className = 'profile-status-main';
@@ -239,7 +319,7 @@ function renderProfileStatusList(state) {
     if (active) {
       const badge = document.createElement('span');
       badge.className = 'profile-active-badge';
-      badge.textContent = '当前配置';
+      badge.textContent = '当前查看';
       title.appendChild(badge);
     }
     if (profile.auto_start) {
@@ -251,18 +331,33 @@ function renderProfileStatusList(state) {
 
     const meta = document.createElement('div');
     meta.className = 'profile-meta';
-    const pid = process.running ? 'PID ' + process.pid : '已停止';
-    meta.textContent = pid + ' · ' + profile.config_path;
+    const runtimeState = process.running ? ('运行中 · PID ' + process.pid) : '已停止';
+    meta.textContent = runtimeState + ' · ' + profile.config_path;
     main.append(title, meta);
 
     const actions = document.createElement('div');
     actions.className = 'profile-actions';
     if (!active) {
-      actions.appendChild(makeButton('设为当前', 'ghost', () => switchProfile(profile.id)));
+      actions.appendChild(makeButton('查看', 'ghost', () => switchProfile(profile.id)));
     }
-    actions.appendChild(makeButton('启动', 'primary', () => withAction(profile.name + ' 已启动', () => call('StartProfile', profile.id)), Boolean(process.running)));
-    actions.appendChild(makeButton('停止', 'danger', () => withAction(profile.name + ' 已停止', () => call('StopProfile', profile.id)), !process.running));
-    actions.appendChild(makeButton('重启', '', () => withAction(profile.name + ' 已重启', () => call('RestartProfile', profile.id)), !process.running));
+    actions.appendChild(makeButton(
+      '启动',
+      'primary',
+      (button) => withAction(profile.name + ' 已启动', () => call('StartProfile', profile.id), button, '启动中…'),
+      Boolean(process.running) || !state.frpc_ready,
+    ));
+    actions.appendChild(makeButton(
+      '停止',
+      'danger',
+      (button) => withAction(profile.name + ' 已停止', () => call('StopProfile', profile.id), button, '停止中…'),
+      !process.running,
+    ));
+    actions.appendChild(makeButton(
+      '重启',
+      '',
+      (button) => withAction(profile.name + ' 已重启', () => call('RestartProfile', profile.id), button, '重启中…'),
+      !process.running || !state.frpc_ready,
+    ));
 
     row.append(main, actions);
     container.appendChild(row);
@@ -272,11 +367,19 @@ function renderProfileStatusList(state) {
 function renderProfileSettingsList(state) {
   const container = $('profileSettingsList');
   container.textContent = '';
-  (state.profiles || []).forEach((item) => {
+  const profiles = state.profiles || [];
+  if (!profiles.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state compact-empty';
+    empty.textContent = '还没有连接配置。';
+    container.appendChild(empty);
+    return;
+  }
+  profiles.forEach((item) => {
     const profile = item.profile;
     const active = profile.id === state.settings?.active_profile_id;
     const row = document.createElement('div');
-    row.className = 'profile-settings-item';
+    row.className = 'profile-settings-item' + (active ? ' is-active' : '');
 
     const main = document.createElement('div');
     main.className = 'profile-settings-main';
@@ -311,6 +414,45 @@ function renderProfileSettingsList(state) {
   });
 }
 
+function renderSystemState(state, total) {
+  const frpcReady = Boolean(state.frpc_ready);
+  if (!frpcReady) {
+    const supported = Boolean(state.frpc_download_supported);
+    setSystemNotice(
+      'warning',
+      'frpc 尚未就绪',
+      supported
+        ? '当前没有可用的 frpc，启动连接前可以直接下载适配 ' + (state.frpc_platform || '当前平台') + ' 的官方版本。'
+        : '当前没有可用的 frpc，请在设置中选择适用于 ' + (state.frpc_platform || '当前平台') + ' 的可执行文件。',
+      supported ? (frpcDownloadBusy ? '下载中…' : '自动下载 frpc') : '前往设置',
+      supported ? () => downloadLatestFRPC($('systemNoticeAction')) : () => openPage('settings'),
+    );
+    $('systemNoticeAction').disabled = supported && frpcDownloadBusy;
+    return;
+  }
+  if (state.startup_error) {
+    setSystemNotice(
+      'error',
+      '自动启动连接时出现问题',
+      state.startup_error,
+      '查看运行状态',
+      () => openPage('status'),
+    );
+    return;
+  }
+  if (total === 0) {
+    setSystemNotice(
+      'info',
+      '还没有连接配置',
+      '添加一个 frpc 配置文件后即可启动连接。',
+      '添加连接',
+      () => openProfileDialog(),
+    );
+    return;
+  }
+  hideSystemNotice();
+}
+
 function render(state) {
   lastState = state;
   const active = activeProfileState(state);
@@ -320,35 +462,61 @@ function render(state) {
   const detached = Boolean(process.detached);
   const total = (state.profiles || []).length;
   const runningCount = Number(state.running_count || 0);
-
-  $('sideStatusDot').className = 'status-dot ' + (runningCount > 0 ? 'running' : 'stopped');
-  $('sideStatusText').textContent = runningCount + '/' + total + ' 个连接运行中';
-  $('sidePid').textContent = active ? '当前：' + active.profile.name : '无连接配置';
-
-  $('heroDot').className = 'hero-dot ' + (runningCount > 0 ? 'running' : '');
-  $('heroState').textContent = runningCount + ' / ' + total + ' 运行中';
-  $('heroDetail').textContent = active
-    ? ('当前连接：' + active.profile.name + (running ? (detached ? ' · 已恢复后台进程' : ' · 当前会话托管') : ' · 已停止'))
-    : '尚未配置连接';
-
-  $('pidValue').textContent = pid;
-  $('startedAtValue').textContent = running ? humanTime(process.started_at) : '—';
-  $('managedValue').textContent = active ? active.profile.name : '—';
-  $('autostartValue').textContent = state.launch_at_login ? '管理器已自启' : '管理器未自启';
-
-  $('startButton').disabled = total === 0 || runningCount === total;
-  $('stopButton').disabled = runningCount === 0;
-  $('restartButton').disabled = runningCount === 0;
-
-  const logs = Array.isArray(process.log_tail) ? process.log_tail : [];
-  $('logOutput').textContent = logs.length ? logs.join('\n') : '暂无日志';
-
-  if (document.activeElement?.id !== 'frpcPath') {
-    $('frpcPath').value = state.settings?.frpc_path || '';
-  }
-
   const frpcReady = Boolean(state.frpc_ready);
   const frpcDownloadSupported = Boolean(state.frpc_download_supported);
+
+  $('sideStatusDot').className = 'status-dot ' + (!frpcReady ? 'warning' : (runningCount > 0 ? 'running' : 'stopped'));
+  $('sideStatusText').textContent = !frpcReady ? 'frpc 未就绪' : runningCount + '/' + total + ' 个连接运行中';
+  $('sidePid').textContent = active ? '当前：' + active.profile.name : '无连接配置';
+
+  $('headerFrpcState').className = 'status-chip ' + (frpcReady ? 'success' : 'warning');
+  $('headerFrpcState').textContent = frpcReady ? 'frpc 已就绪' : 'frpc 未就绪';
+
+  $('heroDot').className = 'hero-dot ' + (!frpcReady ? 'warning' : (runningCount > 0 ? 'running' : ''));
+  $('heroState').textContent = !frpcReady
+    ? '等待配置 frpc'
+    : (total === 0 ? '尚无连接' : runningCount + ' / ' + total + ' 运行中');
+  $('heroDetail').textContent = active
+    ? ('当前查看：' + active.profile.name + (running ? (detached ? ' · 已恢复后台进程' : ' · 当前会话托管') : ' · 已停止'))
+    : '添加连接后可在这里统一管理';
+
+  $('runningCountValue').textContent = String(runningCount);
+  $('runningCountHint').textContent = '共 ' + total + ' 个连接';
+  $('pidValue').textContent = pid;
+  $('startedAtValue').textContent = running ? '启动于 ' + humanTime(process.started_at) : '未运行';
+  $('managedValue').textContent = active ? active.profile.name : '—';
+  $('currentStateValue').textContent = active ? (running ? (detached ? '后台进程已恢复' : '当前会话托管') : '当前已停止') : '未选择连接';
+  $('autostartValue').textContent = state.launch_at_login ? '已开启' : '未开启';
+
+  $('startButton').disabled = !frpcReady || total === 0 || runningCount === total;
+  $('stopButton').disabled = runningCount === 0;
+  $('restartButton').disabled = !frpcReady || runningCount === 0;
+  $('validateButton').disabled = !frpcReady;
+  $('saveRestartVisualButton').disabled = !frpcReady;
+
+  const logs = Array.isArray(process.log_tail) ? process.log_tail : [];
+  const logOutput = $('logOutput');
+  const followLogTail = logOutput.scrollHeight - logOutput.scrollTop - logOutput.clientHeight < 36;
+  logOutput.textContent = logs.length ? logs.join('\n') : (active ? '当前连接暂无日志' : '暂无连接日志');
+  if (followLogTail) {
+    requestAnimationFrame(() => {
+      logOutput.scrollTop = logOutput.scrollHeight;
+    });
+  }
+  $('logDetail').textContent = active
+    ? active.profile.name + ' · 最近 120 行 frpc 输出'
+    : '选择连接后显示最近 120 行 frpc 输出';
+
+  if (!settingsPathDirty && document.activeElement?.id !== 'frpcPath') {
+    $('frpcPath').value = state.settings?.frpc_path || '';
+  }
+  $('saveSettingsButton').disabled = !settingsPathDirty || !$('frpcPath').value.trim();
+  $('frpcPathHelp').textContent = settingsPathDirty
+    ? '路径已修改，尚未保存。后台状态刷新不会覆盖当前输入。'
+    : '选择文件会自动保存；手动输入路径后请点击“保存路径”。';
+
+  $('frpcReadyBadge').className = 'status-chip ' + (frpcReady ? 'success' : 'warning');
+  $('frpcReadyBadge').textContent = frpcReady ? '可用' : '未就绪';
   $('frpcDownloadNotice').classList.toggle('hidden', frpcReady);
   $('downloadFrpcButton').disabled = frpcDownloadBusy || !frpcDownloadSupported;
   $('downloadFrpcButton').textContent = frpcDownloadBusy ? '下载中…' : '下载最新版';
@@ -356,24 +524,25 @@ function render(state) {
     ? '将从 FRP 官方 GitHub Release 下载适用于 ' + (state.frpc_platform || '当前平台') + ' 的 frpc，校验 SHA256 后自动配置。'
     : '当前平台 ' + (state.frpc_platform || '') + ' 暂不支持自动下载，请手动选择 frpc。';
 
-  $('launchAtLogin').checked = Boolean(state.launch_at_login);
-  $('launchAtLogin').disabled = !state.launch_at_login_supported;
+  if (!launchToggleBusy) {
+    $('launchAtLogin').checked = Boolean(state.launch_at_login);
+  }
+  $('launchAtLogin').disabled = launchToggleBusy || !state.launch_at_login_supported;
   $('dataDir').textContent = state.data_dir || '—';
 
   const activePath = active?.profile?.config_path || '';
   $('configPathHint').textContent = activePath || '尚未设置配置路径';
   $('visualConfigPath').textContent = activePath || '尚未设置配置路径';
+  renderProfileSelect($('statusProfileSelect'), state);
   renderProfileSelect($('visualProfileSelect'), state);
   renderProfileSelect($('rawProfileSelect'), state);
   renderProfileStatusList(state);
   renderProfileSettingsList(state);
-
-  if (state.startup_error) {
-    showMessage('自动启动 frpc 失败：' + state.startup_error, 'error');
-  }
+  renderSystemState(state, total);
 }
 
 async function refresh(silent = false) {
+  if (silent && (actionBusyCount > 0 || frpcDownloadBusy || launchToggleBusy)) return;
   try {
     render(await call('GetState'));
   } catch (err) {
@@ -381,13 +550,68 @@ async function refresh(silent = false) {
   }
 }
 
-async function withAction(label, action) {
+async function withAction(label, action, button = null, pendingText = '处理中…') {
+  if (actionBusyCount > 0) {
+    showMessage('已有操作正在执行，请稍候', '');
+    return null;
+  }
+  actionBusyCount += 1;
+  setButtonBusy(button, true, pendingText);
   try {
     const state = await action();
     if (state) render(state);
-    showMessage(label, 'success');
+    if (label) showMessage(label, 'success');
+    return state;
   } catch (err) {
     showMessage(String(err), 'error');
+    return null;
+  } finally {
+    actionBusyCount = Math.max(0, actionBusyCount - 1);
+    if (button?.isConnected) {
+      setButtonBusy(button, false);
+      if (lastState) render(lastState);
+    }
+  }
+}
+
+async function saveFRPCPath(path, button = null, successText = 'frpc 路径已保存') {
+  const value = String(path || '').trim();
+  if (!value) {
+    showMessage('frpc 路径不能为空', 'error');
+    return null;
+  }
+  return withAction(successText, async () => {
+    const settings = {
+      frpc_path: value,
+      active_profile_id: lastState?.settings?.active_profile_id || '',
+      profiles: (lastState?.profiles || []).map((item) => item.profile),
+    };
+    const state = await call('SaveSettings', settings);
+    settingsPathDirty = false;
+    return state;
+  }, button, '保存中…');
+}
+
+async function downloadLatestFRPC(button = null) {
+  if (frpcDownloadBusy) return null;
+  frpcDownloadBusy = true;
+  setButtonBusy(button, true, '下载中…');
+  if (lastState) render(lastState);
+  try {
+    const result = await call('DownloadLatestFRPC');
+    settingsPathDirty = false;
+    const state = await call('GetState');
+    render(state);
+    $('frpcPath').value = result.path || state.settings?.frpc_path || '';
+    showMessage('frpc v' + result.version + ' 下载并配置完成', 'success');
+    return state;
+  } catch (err) {
+    showMessage('下载 frpc 失败：' + String(err), 'error');
+    return null;
+  } finally {
+    frpcDownloadBusy = false;
+    if (button?.isConnected) setButtonBusy(button, false);
+    if (lastState) render(lastState);
   }
 }
 
@@ -405,6 +629,7 @@ function openPage(page) {
 }
 
 async function switchProfile(id) {
+  if (actionBusyCount > 0 || frpcDownloadBusy) return;
   if (!id || id === lastState?.settings?.active_profile_id) return;
   try {
     const state = await call('SetActiveProfile', id);
@@ -439,6 +664,9 @@ async function deleteProfile(profile) {
   const stateItem = (lastState?.profiles || []).find((item) => item.profile?.id === profile.id);
   if (stateItem?.process?.running) {
     showMessage('请先停止连接后再删除', 'error');
+    return;
+  }
+  if (!window.confirm('确定删除连接“' + profile.name + '”吗？\n不会删除原始 frpc 配置文件。')) {
     return;
   }
   try {
@@ -1122,13 +1350,28 @@ document.querySelectorAll('.subtab').forEach((item) => {
   });
 });
 
-$('refreshButton').addEventListener('click', () => refresh());
-$('startButton').addEventListener('click', () => withAction('所有连接已启动', () => call('StartAllProfiles')));
-$('stopButton').addEventListener('click', () => withAction('所有连接已停止', () => call('StopAllProfiles')));
-$('restartButton').addEventListener('click', () => withAction('所有连接已重启', () => call('RestartAllProfiles')));
+$('refreshButton').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  setButtonBusy(button, true, '刷新中…');
+  try {
+    await refresh();
+  } finally {
+    setButtonBusy(button, false);
+  }
+});
+$('startButton').addEventListener('click', (event) => withAction('所有连接已启动', () => call('StartAllProfiles'), event.currentTarget, '启动中…'));
+$('stopButton').addEventListener('click', (event) => withAction('所有连接已停止', () => call('StopAllProfiles'), event.currentTarget, '停止中…'));
+$('restartButton').addEventListener('click', (event) => withAction('所有连接已重启', () => call('RestartAllProfiles'), event.currentTarget, '重启中…'));
 
+$('statusProfileSelect').addEventListener('change', (event) => switchProfile(event.target.value));
 $('visualProfileSelect').addEventListener('change', (event) => switchProfile(event.target.value));
 $('rawProfileSelect').addEventListener('change', (event) => switchProfile(event.target.value));
+$('clearLogViewButton').addEventListener('click', () => {
+  $('logOutput').scrollTop = $('logOutput').scrollHeight;
+});
+$('systemNoticeAction').addEventListener('click', () => {
+  if (typeof noticeAction === 'function') noticeAction();
+});
 
 $('reloadVisualButton').addEventListener('click', () => loadVisualConfig(true));
 $('previewVisualButton').addEventListener('click', previewVisualConfig);
@@ -1226,49 +1469,62 @@ $('validateButton').addEventListener('click', async () => {
   }
 });
 
-$('chooseFrpcButton').addEventListener('click', async () => {
-  try {
-    const value = await call('ChooseFRPCExecutable');
-    if (value) $('frpcPath').value = value;
-  } catch (err) {
-    showMessage(String(err), 'error');
-  }
+$('frpcPath').addEventListener('input', () => {
+  settingsPathDirty = true;
+  $('saveSettingsButton').disabled = !$('frpcPath').value.trim();
+  $('frpcPathHelp').textContent = '路径已修改，尚未保存。后台状态刷新不会覆盖当前输入。';
 });
 
-$('downloadFrpcButton').addEventListener('click', async () => {
-  if (frpcDownloadBusy) return;
-  frpcDownloadBusy = true;
-  if (lastState) render(lastState);
+$('chooseFrpcButton').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  setButtonBusy(button, true, '选择中…');
+  let value = '';
   try {
-    const result = await call('DownloadLatestFRPC');
-    const state = await call('GetState');
-    render(state);
-    $('frpcPath').value = result.path || state.settings?.frpc_path || '';
-    showMessage('frpc v' + result.version + ' 下载并配置完成', 'success');
+    value = await call('ChooseFRPCExecutable');
   } catch (err) {
-    showMessage('下载 frpc 失败：' + String(err), 'error');
+    showMessage(String(err), 'error');
   } finally {
-    frpcDownloadBusy = false;
-    if (lastState) render(lastState);
+    setButtonBusy(button, false);
+  }
+  if (!value) return;
+  $('frpcPath').value = value;
+  settingsPathDirty = true;
+  await saveFRPCPath(value, button, 'frpc 文件已选择并保存');
+});
+
+$('downloadFrpcButton').addEventListener('click', (event) => downloadLatestFRPC(event.currentTarget));
+
+$('saveSettingsButton').addEventListener('click', (event) => {
+  saveFRPCPath($('frpcPath').value, event.currentTarget);
+});
+
+$('themeMode').value = savedThemeMode();
+$('themeMode').addEventListener('change', (event) => {
+  try {
+    const mode = applyThemeMode(event.currentTarget.value);
+    const label = mode === 'dark' ? '深色' : (mode === 'system' ? '跟随系统' : '浅色');
+    showMessage('界面主题已切换为' + label, 'success');
+  } catch (err) {
+    $('themeMode').value = savedThemeMode();
+    showMessage(String(err), 'error');
   }
 });
 
-$('saveSettingsButton').addEventListener('click', async () => {
+$('launchAtLogin').addEventListener('change', async (event) => {
+  const checkbox = event.currentTarget;
+  const desired = checkbox.checked;
+  launchToggleBusy = true;
+  checkbox.disabled = true;
   try {
-    const desiredLaunch = $('launchAtLogin').checked;
-    const settings = {
-      frpc_path: $('frpcPath').value.trim(),
-      active_profile_id: lastState?.settings?.active_profile_id || '',
-      profiles: (lastState?.profiles || []).map((item) => item.profile),
-    };
-    let state = await call('SaveSettings', settings);
-    if (desiredLaunch !== Boolean(state.launch_at_login)) {
-      state = await call('SetLaunchAtLogin', desiredLaunch);
-    }
+    const state = await call('SetLaunchAtLogin', desired);
     render(state);
-    showMessage('设置已保存', 'success');
+    showMessage(desired ? '已开启登录系统时启动' : '已关闭登录系统时启动', 'success');
   } catch (err) {
+    checkbox.checked = Boolean(lastState?.launch_at_login);
     showMessage(String(err), 'error');
+  } finally {
+    launchToggleBusy = false;
+    if (lastState) render(lastState);
   }
 });
 
