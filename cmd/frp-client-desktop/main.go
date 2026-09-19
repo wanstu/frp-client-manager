@@ -79,6 +79,7 @@ func runDesktop(app *App, launch desktopkit.LaunchOptions) error {
 		Title:          "FRP Client Manager",
 		Assets:         kitui.Mount(assets),
 		Bind:           []interface{}{app},
+		Theme:          desktopkit.DefaultThemeConfig(),
 		Launch:         launch,
 		Window:         window,
 		SingleInstance: true,

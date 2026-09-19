@@ -117,7 +117,6 @@ func (a *App) GetState() (UIState, error) {
 	if err != nil {
 		return UIState{}, err
 	}
-
 	profiles := make([]ProfileState, 0, len(settings.Profiles))
 	runningCount := 0
 	var activeProcess frpc.State
@@ -165,6 +164,21 @@ func (a *App) SaveSettings(settings config.Settings) (UIState, error) {
 	if settings.ActiveProfileID == "" {
 		settings.ActiveProfileID = current.ActiveProfileID
 	}
+	if settings.Theme.Mode == "" || settings.Theme.Variant == "" {
+		settings.Theme = current.Theme
+	}
+	if err := a.store.Save(settings); err != nil {
+		return UIState{}, err
+	}
+	return a.GetState()
+}
+
+func (a *App) SetTheme(themeSetting config.ThemeSettings) (UIState, error) {
+	settings, err := a.store.Load()
+	if err != nil {
+		return UIState{}, err
+	}
+	settings.Theme = themeSetting
 	if err := a.store.Save(settings); err != nil {
 		return UIState{}, err
 	}

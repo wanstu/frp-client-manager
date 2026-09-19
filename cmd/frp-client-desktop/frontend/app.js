@@ -21,32 +21,119 @@ let launchToggleBusy = false;
 let noticeAction = null;
 let actionBusyCount = 0;
 
-const THEME_STORAGE_KEY = 'frp-client-manager.theme';
 const THEME_MODES = new Set(['light', 'dark', 'system']);
+let themeCatalog = null;
+let themeCatalogRequest = null;
+let appliedThemeKey = '';
+let applyingThemeKey = '';
 
-function savedThemeMode() {
-  try {
-    const value = localStorage.getItem(THEME_STORAGE_KEY);
-    return THEME_MODES.has(value) ? value : 'light';
-  } catch (_) {
-    return 'light';
-  }
+function normalizeTheme(theme) {
+  const mode = THEME_MODES.has(theme?.mode) ? theme.mode : 'light';
+  const variant = typeof theme?.variant === 'string' && theme.variant ? theme.variant : 'aurora';
+  return {mode, variant};
 }
 
-function applyThemeMode(mode, persist = true) {
-  const next = THEME_MODES.has(mode) ? mode : 'light';
+function catalogThemePacks() {
+  return Array.isArray(themeCatalog?.packs) ? themeCatalog.packs : [];
+}
+
+function themePackKey(name) {
+  const pack = catalogThemePacks().find((item) => item?.name === name);
+  return name + ':' + (pack?.sha256 || '');
+}
+
+function renderThemeControls(state) {
+  const theme = normalizeTheme(state?.settings?.theme);
   if (!window.desktopKitTheme) {
     throw new Error('Desktop Kit 主题模块未加载');
   }
-  window.desktopKitTheme.apply(next);
-  if (persist) {
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch (_) {
-      // Theme still applies for this session if persistence is unavailable.
+
+  window.desktopKitTheme.apply(theme.mode);
+
+  const modeSelect = $('themeMode');
+  if (modeSelect && modeSelect.value !== theme.mode) modeSelect.value = theme.mode;
+
+  const packSelect = $('themePack');
+  const packs = catalogThemePacks();
+  if (packSelect) {
+    const signature = packs.map((pack) => pack.name + ':' + pack.display_name + ':' + pack.sha256).join('|');
+    if (packSelect.dataset.signature !== signature) {
+      packSelect.textContent = '';
+      packs.forEach((pack) => {
+        const option = document.createElement('option');
+        option.value = pack.name;
+        option.textContent = pack.display_name || pack.name;
+        packSelect.appendChild(option);
+      });
+      packSelect.dataset.signature = signature;
+    }
+    if (![...packSelect.options].some((option) => option.value === theme.variant)) {
+      const option = document.createElement('option');
+      option.value = theme.variant;
+      option.textContent = theme.variant;
+      packSelect.appendChild(option);
+    }
+    packSelect.value = theme.variant;
+  }
+
+  const selected = packs.find((pack) => pack.name === theme.variant);
+  const description = $('themePackDescription');
+  if (description) {
+    if (selected?.description) {
+      description.textContent = selected.description;
+    } else if (themeCatalog) {
+      description.textContent = '当前主题目录未包含该主题，可尝试刷新主题。';
+    } else {
+      description.textContent = '正在读取 Kit Runtime Theme 目录…';
     }
   }
-  if ($('themeMode')) $('themeMode').value = next;
+
+  const key = themePackKey(theme.variant);
+  if (appliedThemeKey !== key && applyingThemeKey !== key) {
+    applyingThemeKey = key;
+    window.desktopKitTheme.applyPack(theme.variant)
+      .then(() => {
+        appliedThemeKey = key;
+      })
+      .catch((err) => {
+        if (description && normalizeTheme(lastState?.settings?.theme).variant === theme.variant) {
+          description.textContent = '主题加载失败：' + String(err);
+        }
+      })
+      .finally(() => {
+        if (applyingThemeKey === key) applyingThemeKey = '';
+      });
+  }
+}
+
+async function loadThemeCatalog(force = false) {
+  if (!window.desktopKitTheme) {
+    throw new Error('Desktop Kit 主题模块未加载');
+  }
+  if (themeCatalogRequest && !force) return themeCatalogRequest;
+
+  const request = (force
+    ? window.desktopKitTheme.refreshCatalog()
+    : window.desktopKitTheme.loadCatalog())
+    .then((catalog) => {
+      themeCatalog = catalog;
+      if (lastState) renderThemeControls(lastState);
+      return catalog;
+    })
+    .finally(() => {
+      if (themeCatalogRequest === request) themeCatalogRequest = null;
+    });
+  themeCatalogRequest = request;
+  return request;
+}
+
+async function saveThemeFromControls() {
+  const theme = {
+    mode: $('themeMode').value,
+    variant: $('themePack').value || 'aurora',
+  };
+  const next = await call('SetTheme', theme);
+  render(next);
   return next;
 }
 
@@ -455,6 +542,7 @@ function renderSystemState(state, total) {
 
 function render(state) {
   lastState = state;
+  renderThemeControls(state);
   const active = activeProfileState(state);
   const process = active?.process || {};
   const running = Boolean(process.running);
@@ -585,6 +673,7 @@ async function saveFRPCPath(path, button = null, successText = 'frpc 路径已�
       frpc_path: value,
       active_profile_id: lastState?.settings?.active_profile_id || '',
       profiles: (lastState?.profiles || []).map((item) => item.profile),
+      theme: normalizeTheme(lastState?.settings?.theme),
     };
     const state = await call('SaveSettings', settings);
     settingsPathDirty = false;
@@ -1498,15 +1587,29 @@ $('saveSettingsButton').addEventListener('click', (event) => {
   saveFRPCPath($('frpcPath').value, event.currentTarget);
 });
 
-$('themeMode').value = savedThemeMode();
-$('themeMode').addEventListener('change', (event) => {
+async function handleThemeChange() {
   try {
-    const mode = applyThemeMode(event.currentTarget.value);
-    const label = mode === 'dark' ? '深色' : (mode === 'system' ? '跟随系统' : '浅色');
-    showMessage('界面主题已切换为' + label, 'success');
+    await saveThemeFromControls();
+    showMessage('界面主题已更新', 'success');
   } catch (err) {
-    $('themeMode').value = savedThemeMode();
+    if (lastState) renderThemeControls(lastState);
     showMessage(String(err), 'error');
+  }
+}
+
+$('themeMode').addEventListener('change', handleThemeChange);
+$('themePack').addEventListener('change', handleThemeChange);
+$('refreshThemeCatalogButton').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  setButtonBusy(button, true, '刷新中…');
+  try {
+    const catalog = await loadThemeCatalog(true);
+    const count = Array.isArray(catalog?.packs) ? catalog.packs.length : 0;
+    showMessage('主题目录已刷新，共 ' + count + ' 个主题', 'success');
+  } catch (err) {
+    showMessage('刷新主题失败：' + String(err), 'error');
+  } finally {
+    setButtonBusy(button, false);
   }
 });
 
@@ -1528,5 +1631,8 @@ $('launchAtLogin').addEventListener('change', async (event) => {
   }
 });
 
+loadThemeCatalog().catch((err) => {
+  showMessage('读取主题目录失败，将继续使用内置主题：' + String(err), 'error');
+});
 refresh();
 setInterval(() => refresh(true), 2500);

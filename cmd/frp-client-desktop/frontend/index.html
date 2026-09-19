@@ -11,17 +11,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="/desktopkit/theme.js"></script>
   <script>
-    (() => {
-      const key = 'frp-client-manager.theme';
-      let mode = 'light';
-      try {
-        const saved = localStorage.getItem(key);
-        if (saved === 'dark' || saved === 'system' || saved === 'light') mode = saved;
-      } catch (_) {
-        mode = 'light';
-      }
-      window.desktopKitTheme?.apply(mode);
-    })();
+    window.desktopKitTheme?.apply("light");
   </script>
 </head>
 <body>
@@ -475,12 +465,19 @@
           </div>
         </div>
         <label class="setting-control-row">
-          <span><strong>界面主题</strong><small>默认保持浅色，也可以固定深色或跟随系统。</small></span>
-          <select id="themeMode" class="theme-select" aria-label="界面主题">
+          <span><strong>明暗模式</strong><small>可以固定浅色、深色，或跟随系统。</small></span>
+          <select id="themeMode" class="theme-select" aria-label="明暗模式">
             <option value="light">浅色</option>
             <option value="dark">深色</option>
             <option value="system">跟随系统</option>
           </select>
+        </label>
+        <label class="setting-control-row">
+          <span><strong>配色主题</strong><small id="themePackDescription">由 Kit Runtime Theme 提供，主题包可在线更新。</small></span>
+          <div class="theme-picker-actions">
+            <select id="themePack" class="theme-select" aria-label="配色主题"></select>
+            <button id="refreshThemeCatalogButton" type="button" class="button ghost theme-refresh-button">刷新主题</button>
+          </div>
         </label>
 
         <div class="settings-divider"></div>
