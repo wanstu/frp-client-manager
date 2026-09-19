@@ -25,9 +25,11 @@ func (a *App) DownloadLatestFRPC() (frpcdownload.Result, error) {
 		return frpcdownload.Result{}, errors.New("当前已配置可用的 frpc，无需自动下载")
 	}
 
-	base := a.runtimeContext()
-	if base == nil {
-		base = context.Background()
+	base := context.Background()
+	if controller := a.runtimeController(); controller != nil {
+		if runtimeContext := controller.Context(); runtimeContext != nil {
+			base = runtimeContext
+		}
 	}
 	ctx, cancel := context.WithTimeout(base, 5*time.Minute)
 	defer cancel()

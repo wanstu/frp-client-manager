@@ -75,14 +75,15 @@ func runDesktop(app *App, launch desktopkit.LaunchOptions) error {
 	quitStop.ErrorTitle = "停止全部连接失败，未退出"
 
 	return desktopkit.Run(desktopkit.Config{
-		ID:             "frp-client-manager-v1",
-		Title:          "FRP Client Manager",
-		Assets:         kitui.Mount(assets),
-		Bind:           []interface{}{app},
-		Theme:          desktopkit.DefaultThemeConfig(),
-		Launch:         launch,
-		Window:         window,
-		SingleInstance: true,
+		ID:                   "frp-client-manager-v1",
+		Title:                "FRP Client Manager",
+		Assets:               kitui.Mount(assets),
+		Bind:                 []interface{}{app},
+		Theme:                desktopkit.DefaultThemeConfig(),
+		Launch:               launch,
+		Window:               window,
+		SingleInstance:       true,
+		SecondInstancePolicy: desktopkit.SecondInstanceWakeManual,
 		Tray: desktopkit.TrayConfig{
 			Enabled:            true,
 			Icon:               appIcon,
@@ -93,6 +94,7 @@ func runDesktop(app *App, launch desktopkit.LaunchOptions) error {
 			DisableQuit:        true,
 		},
 		Hooks: desktopkit.Hooks{
+			Ready:    app.setController,
 			Startup:  app.startup,
 			Shutdown: app.shutdown,
 		},

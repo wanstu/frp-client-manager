@@ -16,7 +16,9 @@ import (
 	"frp-client-manager/internal/frpconfig"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	desktopkit "github.com/wanstu/wails-desktop-kit"
 	kitautostart "github.com/wanstu/wails-desktop-kit/autostart"
+	kitpaths "github.com/wanstu/wails-desktop-kit/paths"
 )
 
 type ProfileState struct {
@@ -53,7 +55,7 @@ type App struct {
 
 	mu             sync.RWMutex
 	frpcDownloadMu sync.Mutex
-	ctx            context.Context
+	controller     *desktopkit.Controller
 	startupError   string
 	managers       map[string]*frpc.Manager
 }
@@ -79,11 +81,13 @@ func NewApp() (*App, error) {
 	}, nil
 }
 
-func (a *App) startup(ctx context.Context) {
+func (a *App) setController(controller *desktopkit.Controller) {
 	a.mu.Lock()
-	a.ctx = ctx
+	a.controller = controller
 	a.mu.Unlock()
+}
 
+func (a *App) startup(context.Context) {
 	settings, err := a.store.Load()
 	if err != nil {
 		a.setStartupError(err)
@@ -106,7 +110,11 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
-func (a *App) shutdown(context.Context) {}
+func (a *App) shutdown(context.Context) {
+	a.mu.Lock()
+	a.controller = nil
+	a.mu.Unlock()
+}
 
 func (a *App) GetState() (UIState, error) {
 	settings, err := a.store.Load()
@@ -192,8 +200,8 @@ func (a *App) SetLaunchAtLogin(value bool) (UIState, error) {
 	if err := a.launchAtLogin.SetEnabled(value); err != nil {
 		return UIState{}, err
 	}
-	if ctx := a.runtimeContext(); ctx != nil {
-		wailsruntime.EventsEmit(ctx, "desktop:preferences-changed")
+	if controller := a.runtimeController(); controller != nil {
+		_ = controller.Emit("desktop:preferences-changed")
 	}
 	return a.GetState()
 }
@@ -507,11 +515,11 @@ func (a *App) SaveVisualConfig(cfg frpconfig.ClientConfig) (UIState, error) {
 }
 
 func (a *App) ChooseFRPCExecutable() (string, error) {
-	ctx := a.runtimeContext()
-	if ctx == nil {
+	controller := a.runtimeController()
+	if controller == nil {
 		return "", errors.New("桌面运行时尚未就绪")
 	}
-	return wailsruntime.OpenFileDialog(ctx, wailsruntime.OpenDialogOptions{
+	return controller.OpenFileDialog(wailsruntime.OpenDialogOptions{
 		Title: "选择 frpc 可执行文件",
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "frpc executable", Pattern: "frpc.exe;frpc"},
@@ -521,11 +529,11 @@ func (a *App) ChooseFRPCExecutable() (string, error) {
 }
 
 func (a *App) ChooseConfigFile() (string, error) {
-	ctx := a.runtimeContext()
-	if ctx == nil {
+	controller := a.runtimeController()
+	if controller == nil {
 		return "", errors.New("桌面运行时尚未就绪")
 	}
-	return wailsruntime.OpenFileDialog(ctx, wailsruntime.OpenDialogOptions{
+	return controller.OpenFileDialog(wailsruntime.OpenDialogOptions{
 		Title: "选择 frpc 配置文件",
 		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "FRP config", Pattern: "*.toml;*.ini;*.yaml;*.yml;*.json"},
@@ -589,18 +597,13 @@ func (a *App) manager(id string) *frpc.Manager {
 }
 
 func samePath(a, b string) bool {
-	left, errLeft := filepath.Abs(strings.TrimSpace(a))
-	right, errRight := filepath.Abs(strings.TrimSpace(b))
-	if errLeft == nil && errRight == nil {
-		return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
-	}
-	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+	return kitpaths.SamePath(a, b)
 }
 
-func (a *App) runtimeContext() context.Context {
+func (a *App) runtimeController() *desktopkit.Controller {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.ctx
+	return a.controller
 }
 
 func (a *App) setStartupError(err error) {

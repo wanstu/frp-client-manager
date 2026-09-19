@@ -3,17 +3,17 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/wanstu/wails-desktop-kit/jsonstore"
 	kitpaths "github.com/wanstu/wails-desktop-kit/paths"
+	kittheme "github.com/wanstu/wails-desktop-kit/theme"
 )
 
 const appDirName = "frp-client-manager"
@@ -44,6 +44,32 @@ type Settings struct {
 type Store struct {
 	dir  string
 	path string
+}
+
+func (s *Store) settingsStore() *jsonstore.Store[Settings] {
+	return jsonstore.New(s.path, jsonstore.Options[Settings]{
+		Normalize: func(settings *Settings) {
+			defaults := s.defaults()
+			if strings.TrimSpace(settings.FRPCPath) == "" {
+				settings.FRPCPath = defaults.FRPCPath
+			}
+			if len(settings.Profiles) == 0 {
+				path := strings.TrimSpace(settings.ConfigPath)
+				if path == "" {
+					path = defaults.Profiles[0].ConfigPath
+				}
+				settings.Profiles = []Profile{{
+					ID:         "default",
+					Name:       "默认连接",
+					ConfigPath: path,
+					AutoStart:  settings.StartFRPCOnLaunch,
+				}}
+				settings.ActiveProfileID = "default"
+			}
+			normalizeSettings(settings)
+		},
+		Validate: validateSettings,
+	})
 }
 
 func NewStore() (*Store, error) {
@@ -125,7 +151,7 @@ func migrateManagedPath(path, sourceDir, targetDir string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return path, nil
 	}
-	if err := copyFileAtomic(path, target, info.Mode().Perm()); err != nil {
+	if _, err := kitpaths.MigrateFileIfMissing(path, target); err != nil {
 		return "", err
 	}
 	return target, nil
@@ -133,176 +159,32 @@ func migrateManagedPath(path, sourceDir, targetDir string) (string, error) {
 
 func migrateRuntimeState(sourceDir, targetDir string) error {
 	for _, name := range []string{"frpc.pid.json", "frpc.log", "instances"} {
-		if err := copyPathMissing(filepath.Join(sourceDir, name), filepath.Join(targetDir, name)); err != nil {
+		if _, err := kitpaths.MigrateTreeMissing(filepath.Join(sourceDir, name), filepath.Join(targetDir, name)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func copyPathMissing(source, target string) error {
-	info, err := os.Lstat(source)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil
-	}
-	if info.IsDir() {
-		if err := os.MkdirAll(target, 0o700); err != nil {
-			return err
-		}
-		entries, err := os.ReadDir(source)
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err := copyPathMissing(filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if !info.Mode().IsRegular() {
-		return nil
-	}
-	if _, err := os.Stat(target); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return copyFileAtomic(source, target, info.Mode().Perm())
-}
-
-func copyFileAtomic(source, target string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return err
-	}
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".migrate-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if mode == 0 {
-		mode = 0o600
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := io.Copy(tmp, in); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, target)
-}
-
 func samePath(a, b string) bool {
-	left, errLeft := filepath.Abs(a)
-	right, errRight := filepath.Abs(b)
-	if errLeft != nil || errRight != nil {
-		return filepath.Clean(a) == filepath.Clean(b)
-	}
-	return strings.EqualFold(filepath.Clean(left), filepath.Clean(right))
+	return kitpaths.SamePath(a, b)
 }
 
 func (s *Store) Dir() string { return s.dir }
 
 func (s *Store) Load() (Settings, error) {
-	data, err := os.ReadFile(s.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return s.defaults(), nil
-	}
+	settings, err := s.settingsStore().Load()
 	if err != nil {
 		return Settings{}, fmt.Errorf("read settings: %w", err)
-	}
-
-	var settings Settings
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return Settings{}, fmt.Errorf("decode settings: %w", err)
-	}
-
-	defaults := s.defaults()
-	if strings.TrimSpace(settings.FRPCPath) == "" {
-		settings.FRPCPath = defaults.FRPCPath
-	}
-
-	if len(settings.Profiles) == 0 {
-		path := strings.TrimSpace(settings.ConfigPath)
-		if path == "" {
-			path = defaults.Profiles[0].ConfigPath
-		}
-		settings.Profiles = []Profile{{
-			ID:         "default",
-			Name:       "默认连接",
-			ConfigPath: path,
-			AutoStart:  settings.StartFRPCOnLaunch,
-		}}
-		settings.ActiveProfileID = "default"
-	}
-
-	normalizeSettings(&settings)
-	if err := validateSettings(settings); err != nil {
-		return Settings{}, fmt.Errorf("invalid settings: %w", err)
 	}
 	return settings, nil
 }
 
 func (s *Store) Save(settings Settings) error {
-	normalizeSettings(&settings)
 	settings.ConfigPath = ""
 	settings.StartFRPCOnLaunch = false
-	if err := validateSettings(settings); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.dir, 0o700); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode settings: %w", err)
-	}
-	data = append(data, '\n')
-	tmp, err := os.CreateTemp(s.dir, "settings-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create settings temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("protect settings temp file: %w", err)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write settings temp file: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync settings temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close settings temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		return fmt.Errorf("replace settings: %w", err)
+	if err := s.settingsStore().Save(settings); err != nil {
+		return fmt.Errorf("save settings: %w", err)
 	}
 	return nil
 }
@@ -389,13 +271,11 @@ func validateSettings(settings Settings) error {
 	if settings.FRPCPath == "" {
 		return errors.New("frpc path is required")
 	}
-	switch settings.Theme.Mode {
-	case "light", "dark", "system":
-	default:
-		return fmt.Errorf("invalid theme mode %q", settings.Theme.Mode)
+	if err := kittheme.ValidateMode(kittheme.Mode(settings.Theme.Mode)); err != nil {
+		return fmt.Errorf("invalid theme mode %q: %w", settings.Theme.Mode, err)
 	}
-	if strings.TrimSpace(settings.Theme.Variant) == "" {
-		return errors.New("theme variant is required")
+	if err := kittheme.ValidatePackName(settings.Theme.Variant); err != nil {
+		return fmt.Errorf("invalid theme variant %q: %w", settings.Theme.Variant, err)
 	}
 	if len(settings.Profiles) == 0 {
 		return errors.New("at least one profile is required")
